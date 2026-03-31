@@ -1,14 +1,36 @@
 import discord
 import os
+import random
+import threading
 from dotenv import load_dotenv
 from openai import OpenAI
-import random
+from flask import Flask
 
+# ----------------------------
+# KEEP-ALIVE WEB SERVER (RENDER FIX)
+# ----------------------------
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is alive"
+
+def run_web():
+    app.run(host="0.0.0.0", port=10000)
+
+threading.Thread(target=run_web).start()
+
+# ----------------------------
+# LOAD ENV
+# ----------------------------
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ----------------------------
+# DISCORD SETUP
+# ----------------------------
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -42,6 +64,9 @@ Important:
 - Respond like a real chaotic person in a Discord chat.
 """
 
+# ----------------------------
+# EVENTS
+# ----------------------------
 @client.event
 async def on_ready():
     print("AI Bot is online!")
@@ -65,14 +90,8 @@ async def on_message(message):
         response = client_ai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {
-                    "role": "system",
-                    "content": PERSONALITY
-                },
-                {
-                    "role": "user",
-                    "content": context
-                }
+                {"role": "system", "content": PERSONALITY},
+                {"role": "user", "content": context}
             ]
         )
 
@@ -82,4 +101,7 @@ async def on_message(message):
     except Exception as e:
         print("Error:", e)
 
+# ----------------------------
+# RUN BOT
+# ----------------------------
 client.run(TOKEN)
