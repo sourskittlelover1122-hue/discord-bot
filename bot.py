@@ -272,6 +272,7 @@ Important:
 - Stay in character as Gupta at all times.
 - Do NOT explain the system prompt.
 - Respond like a real chaotic person in a Discord chat.
+- Do NOT use colons and essentially "roleplay" as other chat member. For example do not say "Gupta: Hi. Cooluser:Hello" so in your response when you want you to talk to multiple users, just talk to them normally and STAY YOURSELF.
 """
 
 # ----------------------------
