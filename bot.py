@@ -312,7 +312,7 @@ async def gupta_ping_task():
     await client.wait_until_ready()
 
     while not client.is_closed():
-        await asyncio.sleep(20)  # 18 hours
+        await asyncio.sleep(60 * 60 * 18)  # 18 hours
 
         try:
             for guild in client.guilds:
@@ -336,7 +336,6 @@ async def gupta_ping_task():
 
                 reply = response.choices[0].message.content
 
-                # send in first available text channel
                 for channel in guild.text_channels:
                     if channel.permissions_for(guild.me).send_messages:
                         await channel.send(f"{target.mention} {reply}")
@@ -344,8 +343,6 @@ async def gupta_ping_task():
 
         except Exception as e:
             print("Ping Task Error:", e)
-
-    print("AI Bot is online!")
 
 @client.event
 async def on_message(message):
