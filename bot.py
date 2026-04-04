@@ -35,6 +35,7 @@ client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # ----------------------------
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 client = discord.Client(intents=intents)
 
@@ -303,7 +304,6 @@ Important:
 # EVENTS
 # ----------------------------
 @client.event
-@client.event
 async def on_ready():
     print("AI Bot is online!")
     client.loop.create_task(gupta_ping_task())
@@ -311,14 +311,19 @@ async def on_ready():
 async def gupta_ping_task():
     await client.wait_until_ready()
 
-    while not client.is_closed():
-        await asyncio.sleep(60 * 60 * 18)  # 18 hours
+    # FIRST RUN QUICK (20 seconds)
+    await asyncio.sleep(20)
 
+    while not client.is_closed():
         try:
             for guild in client.guilds:
+                # fetch members properly
                 members = [m for m in guild.members if not m.bot]
 
+                print(f"Found {len(members)} members")  # DEBUG
+
                 if not members:
+                    print("No members found!")
                     continue
 
                 target = random.choice(members)
@@ -336,13 +341,22 @@ async def gupta_ping_task():
 
                 reply = response.choices[0].message.content
 
+                sent = False
+
                 for channel in guild.text_channels:
                     if channel.permissions_for(guild.me).send_messages:
                         await channel.send(f"{target.mention} {reply}")
+                        sent = True
                         break
+
+                if not sent:
+                    print("No valid channel to send message")
 
         except Exception as e:
             print("Ping Task Error:", e)
+
+        # AFTER FIRST RUN → 18 HOURS
+        await asyncio.sleep(60 * 60 * 18)
 
 @client.event
 async def on_message(message):
