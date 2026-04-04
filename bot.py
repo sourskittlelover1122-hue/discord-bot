@@ -3,6 +3,7 @@ import os
 import random
 import threading
 import time
+import asyncio
 from dotenv import load_dotenv
 from openai import OpenAI
 from flask import Flask
@@ -38,6 +39,18 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 
 memory = []
+
+GAMES = [
+    "Minecraft",
+    "Darktide",
+    "Rainbow Six Siege",
+    "Roblox",
+    "Geometry Dash",
+    "Warframe",
+    "Arcane Odyssey",
+    "some weird obscure indie game",
+    "join VC"
+]
 
 # 🔥 COOLDOWN SYSTEM
 last_response_time = 0
@@ -290,7 +303,48 @@ Important:
 # EVENTS
 # ----------------------------
 @client.event
+@client.event
 async def on_ready():
+    print("AI Bot is online!")
+    client.loop.create_task(gupta_ping_task())
+
+async def gupta_ping_task():
+    await client.wait_until_ready()
+
+    while not client.is_closed():
+        await asyncio.sleep(20)  # 18 hours
+
+        try:
+            for guild in client.guilds:
+                members = [m for m in guild.members if not m.bot]
+
+                if not members:
+                    continue
+
+                target = random.choice(members)
+                game = random.choice(GAMES)
+
+                prompt = f"Tell {target.name} to hop on {game} in a chaotic rude way."
+
+                response = client_ai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": PERSONALITY},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+
+                reply = response.choices[0].message.content
+
+                # send in first available text channel
+                for channel in guild.text_channels:
+                    if channel.permissions_for(guild.me).send_messages:
+                        await channel.send(f"{target.mention} {reply}")
+                        break
+
+        except Exception as e:
+            print("Ping Task Error:", e)
+
     print("AI Bot is online!")
 
 @client.event
