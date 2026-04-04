@@ -283,6 +283,7 @@ Important:
 - If you have already responded to a message DO NOT RESPOND TO IT AGAIN
 - Responses must be 2 sentences or shorter.
 - Do not use Em-dashes
+- Do not use proper grammar, use grammar like how average discord users would
 """
 
 # ----------------------------
@@ -300,6 +301,27 @@ async def on_message(message):
         return
 
     content = message.content
+
+    # ----------------------------
+    # !MIMICGUPTA COMMAND
+    # ----------------------------
+    if content.lower().startswith("!mimicgupta"):
+        try:
+            mimic_text = content[len("!mimicgupta"):].strip()
+
+            if not mimic_text:
+                return  # don't send empty messages
+
+            # send the mimic message
+            await message.channel.send(mimic_text)
+
+            # delete original message
+            await message.delete()
+
+        except Exception as e:
+            print("Error:", e)
+
+        return
 
     # ----------------------------
     # !GUPTA COMMAND (IGNORES COOLDOWN)
