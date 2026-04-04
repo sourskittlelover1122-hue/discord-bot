@@ -49,7 +49,7 @@ GAMES = [
     "Geometry Dash",
     "Warframe",
     "Arcane Odyssey",
-    "some weird obscure indie game",
+    "Jerkmate ranked",
     "join VC"
 ]
 
