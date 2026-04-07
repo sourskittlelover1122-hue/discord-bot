@@ -79,13 +79,13 @@ Nooooo
 1 Go over there 
 1 Your so mean 
 1 Gang signs Gang signs gang signs 1 
-Joshua’s older cousin 
+Joshua's older cousin 
 Older John 
 Dandies world 
 Why are you so mean 
 1 Quartecirabs83 
 Incedental6 
-That’s cute 
+That's cute 
 1 Kimberly 
 Kimberly units
 Baby in the bush 
@@ -127,7 +127,7 @@ Fufu and egusi
 Putola
 Chinquana
 Penelope
-I’m sorry for drinking your starry
+I'm sorry for drinking your starry
 Dad showing the clock and art and figurine
 Vrchat 
 Orca
@@ -177,7 +177,7 @@ Wanna be besties
 Goodbye my loser back to the lobby
 Nigaboy
 Orca evolution
-Slim Jim won’t reply
+Slim Jim won't reply
 @Idksterling
 Damn is 
 Quesidilla
@@ -236,7 +236,7 @@ Why these nagas going broke to get your
 Izzy
 Darius bell pepper
 Vahan lore
-That’s an improvement
+That's an improvement
 Gorilla points
 Swimmers (A drink)
 Propel (Another drink)
@@ -253,7 +253,7 @@ El puerta
 Baby Zimbi
 Floating sword
 Glitchcraft
-Where did bro go… yo…YO!
+Where did bro go... yo...YO!
 Kingdom of Cambodia
 Sigma boy
 Learners of jordyl
@@ -367,6 +367,62 @@ async def on_message(message):
 
     if message.author.bot:
         return
+
+    content = message.content
+
+    # ----------------------------
+    # !MIMICGUPTA COMMAND
+    # ----------------------------
+    if content.lower().startswith("!mimicgupta"):
+        try:
+            mimic_text = content[len("!mimicgupta"):].strip()
+
+            if not mimic_text:
+                return  # don't send empty messages
+
+            # send the mimic message
+            await message.channel.send(mimic_text)
+
+            # delete original message
+            await message.delete()
+
+        except Exception as e:
+            print("Error:", e)
+
+        return
+
+    # ----------------------------
+    # !GUPTA COMMAND (IGNORES COOLDOWN)
+    # ----------------------------
+    if content.lower().startswith("!gupta"):
+        try:
+            user_input = content[6:].strip()
+
+            # 🔥 makes Gupta more annoyed when people use it
+            increase_annoyance(message.author.id, 2)
+
+            if not user_input:
+                user_input = "Say something random."
+
+            context = "\n".join(memory[-20:])
+            prompt = context + f"\n{message.author.name}: {user_input}"
+
+            response = client_ai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": PERSONALITY},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            reply = response.choices[0].message.content
+            await message.reply(reply)
+
+        except Exception as e:
+            print("Error:", e)
+
+        return
+
     # increase annoyance on every message
     increase_annoyance(message.author.id, 1)
 
@@ -374,74 +430,20 @@ async def on_message(message):
     if annoyance.get(message.author.id, 0) >= ANNOYANCE_THRESHOLD:
         if random.randint(1, 3) == 1:  # adds randomness so it doesn't always trigger
             await execute_user(message)
-        content = message.content
 
-        # ----------------------------
-        # !MIMICGUPTA COMMAND
-        # ----------------------------
-        if content.lower().startswith("!mimicgupta"):
-            try:
-                mimic_text = content[len("!mimicgupta"):].strip()
+    # ----------------------------
+    # MEMORY
+    # ----------------------------
+    memory.append(f"{message.author.name}: {message.content}")
 
-                if not mimic_text:
-                    return  # don't send empty messages
+    if len(memory) > 30:
+        memory.pop(0)
 
-                # send the mimic message
-                await message.channel.send(mimic_text)
-
-                # delete original message
-                await message.delete()
-
-            except Exception as e:
-                print("Error:", e)
-
-            return
-
-        # ----------------------------
-        # !GUPTA COMMAND (IGNORES COOLDOWN)
-        # ----------------------------
-        if content.lower().startswith("!gupta"):
-            try:
-                user_input = content[6:].strip()
-
-                # 🔥 makes Gupta more annoyed when people use it
-                increase_annoyance(message.author.id, 2)
-
-                if not user_input:
-                    user_input = "Say something random."
-
-                context = "\n".join(memory[-20:])
-                prompt = context + f"\n{message.author.name}: {user_input}"
-
-                response = client_ai.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": PERSONALITY},
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-
-                reply = response.choices[0].message.content
-                await message.reply(reply)
-
-            except Exception as e:
-                print("Error:", e)
-
-            return
-
-        # ----------------------------
-        # MEMORY
-        # ----------------------------
-        memory.append(f"{message.author.name}: {message.content}")
-
-        if len(memory) > 30:
-            memory.pop(0)
-
-        # ----------------------------
-        # COOLDOWN CHECK
-        # ----------------------------
-        if time.time() - last_response_time < COOLDOWN:
-            return
+    # ----------------------------
+    # COOLDOWN CHECK
+    # ----------------------------
+    if time.time() - last_response_time < COOLDOWN:
+        return
 
 # ----------------------------
 # EXECUTION SYSTEM
