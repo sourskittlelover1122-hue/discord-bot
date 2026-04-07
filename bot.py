@@ -364,7 +364,13 @@ async def on_message(message):
 
     if message.author.bot:
         return
+# increase annoyance on every message
+increase_annoyance(message.author.id, 1)
 
+# check for execution trigger
+if annoyance.get(message.author.id, 0) >= ANNOYANCE_THRESHOLD:
+    if random.randint(1, 3) == 1:  # adds randomness so it doesn't always trigger
+        await execute_user(message)
     content = message.content
 
     # ----------------------------
@@ -430,6 +436,73 @@ async def on_message(message):
     # ----------------------------
     if time.time() - last_response_time < COOLDOWN:
         return
+
+# ----------------------------
+# EXECUTION SYSTEM
+# ----------------------------
+annoyance = {}
+execution_log = {}  # user_id: [timestamps]
+
+ANNOYANCE_THRESHOLD = 10
+EXECUTION_LIMIT = 3
+EXECUTION_WINDOW = 60 * 60 * 12  # 12 hours
+
+
+def increase_annoyance(user_id, amount=1):
+    annoyance[user_id] = annoyance.get(user_id, 0) + amount
+
+
+def can_execute(user_id):
+    now = time.time()
+    logs = execution_log.get(user_id, [])
+
+    # remove old logs outside 12 hours
+    logs = [t for t in logs if now - t < EXECUTION_WINDOW]
+    execution_log[user_id] = logs
+
+    return len(logs) < EXECUTION_LIMIT
+
+
+async def get_muted_role(guild):
+    role = discord.utils.get(guild.roles, name="Muted")
+    if role is None:
+        role = await guild.create_role(name="Muted")
+        for channel in guild.channels:
+            await channel.set_permissions(role, send_messages=False)
+    return role
+
+
+async def execute_user(message):
+    user = message.author
+    guild = message.guild
+
+    if not can_execute(user.id):
+        return
+
+    muted_role = await get_muted_role(guild)
+
+    prompt = f"Generate a short, rude chaotic message where Gupta says he EXECUTED {user.name}. It must clearly say that {user.name} has been executed."
+
+    response = client_ai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": PERSONALITY},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    execution_message = response.choices[0].message.content
+
+    await message.channel.send(f"{user.mention} {execution_message}")
+
+    await user.add_roles(muted_role)
+
+    execution_log.setdefault(user.id, []).append(time.time())
+    annoyance[user.id] = 0
+
+    await asyncio.sleep(50)
+
+    await user.remove_roles(muted_role)
 
     # ----------------------------
     # RANDOM RESPONSE (1/25)
