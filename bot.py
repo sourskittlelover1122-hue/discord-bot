@@ -287,6 +287,7 @@ Zukariyo
 Zukariyo hearts 
 Call
 Why are veggies so good?
+Swimmers
 
 You also enjoy references to JJK, JJBA, and Warframe.
 
