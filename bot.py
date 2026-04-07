@@ -367,81 +367,81 @@ async def on_message(message):
 
     if message.author.bot:
         return
-# increase annoyance on every message
-increase_annoyance(message.author.id, 1)
+    # increase annoyance on every message
+    increase_annoyance(message.author.id, 1)
 
-# check for execution trigger
-if annoyance.get(message.author.id, 0) >= ANNOYANCE_THRESHOLD:
-    if random.randint(1, 3) == 1:  # adds randomness so it doesn't always trigger
-        await execute_user(message)
-    content = message.content
+    # check for execution trigger
+    if annoyance.get(message.author.id, 0) >= ANNOYANCE_THRESHOLD:
+        if random.randint(1, 3) == 1:  # adds randomness so it doesn't always trigger
+            await execute_user(message)
+        content = message.content
 
-    # ----------------------------
-    # !MIMICGUPTA COMMAND
-    # ----------------------------
-    if content.lower().startswith("!mimicgupta"):
-        try:
-            mimic_text = content[len("!mimicgupta"):].strip()
+        # ----------------------------
+        # !MIMICGUPTA COMMAND
+        # ----------------------------
+        if content.lower().startswith("!mimicgupta"):
+            try:
+                mimic_text = content[len("!mimicgupta"):].strip()
 
-            if not mimic_text:
-                return  # don't send empty messages
+                if not mimic_text:
+                    return  # don't send empty messages
 
-            # send the mimic message
-            await message.channel.send(mimic_text)
+                # send the mimic message
+                await message.channel.send(mimic_text)
 
-            # delete original message
-            await message.delete()
+                # delete original message
+                await message.delete()
 
-        except Exception as e:
-            print("Error:", e)
+            except Exception as e:
+                print("Error:", e)
 
-        return
+            return
 
-    # ----------------------------
-    # !GUPTA COMMAND (IGNORES COOLDOWN)
-    # ----------------------------
-    if content.lower().startswith("!gupta"):
-         try:
-        user_input = content[6:].strip()
+        # ----------------------------
+        # !GUPTA COMMAND (IGNORES COOLDOWN)
+        # ----------------------------
+        if content.lower().startswith("!gupta"):
+            try:
+                user_input = content[6:].strip()
 
-        # 🔥 makes Gupta more annoyed when people use it
-        increase_annoyance(message.author.id, 2)
+                # 🔥 makes Gupta more annoyed when people use it
+                increase_annoyance(message.author.id, 2)
 
-        if not user_input:
-            user_input = "Say something random."
+                if not user_input:
+                    user_input = "Say something random."
 
-        context = "\n".join(memory[-20:])
-        prompt = context + f"\n{message.author.name}: {user_input}"
+                context = "\n".join(memory[-20:])
+                prompt = context + f"\n{message.author.name}: {user_input}"
 
-        response = client_ai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": PERSONALITY},
-                {"role": "user", "content": prompt}
-            ]
-        )
+                response = client_ai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": PERSONALITY},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
 
-        reply = response.choices[0].message.content
-        await message.reply(reply)
+                reply = response.choices[0].message.content
+                await message.reply(reply)
 
-    except Exception as e:
-        print("Error:", e)
+            except Exception as e:
+                print("Error:", e)
 
-    return
+            return
 
-    # ----------------------------
-    # MEMORY
-    # ----------------------------
-    memory.append(f"{message.author.name}: {message.content}")
+        # ----------------------------
+        # MEMORY
+        # ----------------------------
+        memory.append(f"{message.author.name}: {message.content}")
 
-    if len(memory) > 30:
-        memory.pop(0)
+        if len(memory) > 30:
+            memory.pop(0)
 
-    # ----------------------------
-    # COOLDOWN CHECK
-    # ----------------------------
-    if time.time() - last_response_time < COOLDOWN:
-        return
+        # ----------------------------
+        # COOLDOWN CHECK
+        # ----------------------------
+        if time.time() - last_response_time < COOLDOWN:
+            return
 
 # ----------------------------
 # EXECUTION SYSTEM
