@@ -4,6 +4,7 @@ import random
 import threading
 import time
 import asyncio
+from types import SimpleNamespace
 from dotenv import load_dotenv
 from openai import OpenAI
 from flask import Flask
@@ -79,161 +80,7 @@ Nooooo
 1 Go over there 
 1 Your so mean 
 1 Gang signs Gang signs gang signs 1 
-Joshua's older cousin 
-Older John 
-Dandies world 
-Why are you so mean 
-1 Quartecirabs83 
-Incedental6 
-That's cute 
-1 Kimberly 
-Kimberly units
-Baby in the bush 
-Jaden ke 
-Joshua 
-1 Testicular thrombosis 
-Chuffy 
-God of magma 
-1 Chuffy in the backseat
- Joshua walker
- Charles walker 
-Naga babies
- Naga 
-1 I just bought more land in the metaverse
- 1 WATCH THE FUCKING MOVIE
-Maya 
-Toru 
-Mrleave 
-What is your problem 
- deltarune 
-Battle for dream island Danny 
-Phalcon 
-1 Carousel fish 
-Buddha 
-Gouda 
-Pray to the (gouda/buddha) before you eat 
-Gesepe 
-Josh 
-Psycho teddy 
-Forsaken
- Driving in my car right after a beer 
-1 Non-binary jokes (exclusively related to binary code) Best friends! 
-1 Swim camp
-Musu: bo 
-dad: sleep
-Put me back in twelfth grade
-Your grounded
-Fufu and egusi
-Putola
-Chinquana
-Penelope
-I'm sorry for drinking your starry
-Dad showing the clock and art and figurine
-Vrchat 
-Orca
-Pufferphich
-Tiger_the_fish
-Nice mode/evil mode
-Your little program guy ™️ 
-The n word
-68
-Cookies and cream
-Bahn mi
-_ is a _ from_
-Chai
-Kirstelnat 
-Elyssa
-Lorfongafergus
-Raya
-Chundle blocks
-Evil Chundle blocks
-Governor of Mozambique
-MozamLive
-Vahan
-Chunligyatzamnboing
-Providence of Brescia Italy
-How to properly finger your butt
-This artist is talented
-Discordia
-Game server
-Half of my heart is in 🇨🇺 
-Administrator 
-Ev apology 
-Jordyl
-Learners of jordyl
-Adrian
-Si camera q
-Sandwhich news
-Jordy tapes
-Chinquana white
-Putola black
-Eagle ridge
-The temple
-Mr helke gaming
-Mr Kraft gaming
-Ian
-Your so cute
-Wanna be besties
-Goodbye my loser back to the lobby
-Nigaboy
-Orca evolution
-Slim Jim won't reply
-@Idksterling
-Damn is 
-Quesidilla
-Dylan
-Emily
-The fam Danny
-Obamium
-Danny devito
-Opisthename
-Gibblet
-Apt apt
-Depas
-Capid and friends
-Mii
-Hello
-Hi
-Hahaha
-Riveredge
-Glitch
-Talking tom
-Talking tom glitch
-Mozambique breakfast platter
-Day on hod
-Day two Mozambique
-T
-Foxy
-Damien
-Monstermax
-You play with too much girly poop 
-Fergus
-Fergus pickaxe
-Fergus falls
-King fergus
-Zepito
-Why arnt you in school
-Ass size create now
-Boob size create now
-Margulas
-Jordy steak house
-Jordy bar and steak house
-Bacteria in your sandwhich
-Tobias tofu
-Kysh
-Cutecookiegaming
-Sleep!!!!!
-Dingdong I know you can hear me
-Pov giờ
-Gio
-Gupta
-Dante
-Gupta truck
-Thank you
-Gupta flying through the air
-Mr Fassbender
-Why these nagas going broke to get your
-Izzy
+Joshua's older cousin
 Darius bell pepper
 Vahan lore
 That's an improvement
@@ -420,6 +267,52 @@ async def on_message(message):
 
         except Exception as e:
             print("Error:", e)
+
+        return
+
+    # ----------------------------
+    # !FEEDTODANTE COMMAND
+    # Usage: !FeedtoDante <username>
+    # Finds the user in the guild and executes them immediately.
+    # ----------------------------
+    if content.lower().startswith("!feedtodante"):
+        try:
+            target_text = content[len("!feedtodante"):].strip()
+
+            if not target_text:
+                await message.channel.send("Usage: !FeedtoDante <username>")
+                return
+
+            guild = message.guild
+            target = None
+
+            # prefer explicit mentions
+            if message.mentions:
+                target = message.mentions[0]
+            else:
+                # match by name or display_name (case-insensitive)
+                for m in guild.members:
+                    if m.name.lower() == target_text.lower() or getattr(m, 'display_name', '').lower() == target_text.lower():
+                        target = m
+                        break
+
+                # try name#discriminator
+                if not target and '#' in target_text:
+                    name, disc = target_text.rsplit('#', 1)
+                    for m in guild.members:
+                        if getattr(m, 'discriminator', None) == disc and m.name == name:
+                            target = m
+                            break
+
+            if not target:
+                await message.channel.send("User not found.")
+                return
+
+            fake_msg = SimpleNamespace(author=target, guild=message.guild, channel=message.channel)
+            await execute_user(fake_msg)
+
+        except Exception as e:
+            print("FeedtoDante error:", e)
 
         return
 
