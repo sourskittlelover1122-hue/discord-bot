@@ -400,8 +400,8 @@ if annoyance.get(message.author.id, 0) >= ANNOYANCE_THRESHOLD:
     # ----------------------------
     # !GUPTA COMMAND (IGNORES COOLDOWN)
     # ----------------------------
-     if content.lower().startswith("!gupta"):
-     try:
+    if content.lower().startswith("!gupta"):
+    try:
         user_input = content[6:].strip()
 
         # 🔥 makes Gupta more annoyed when people use it
