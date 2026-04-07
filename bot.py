@@ -483,34 +483,64 @@ async def get_muted_role(guild):
 async def execute_user(message):
     user = message.author
     guild = message.guild
+    global last_response_time
 
     if not can_execute(user.id):
+        print(f"Can't execute {user.name}: limit reached")
         return
 
-    muted_role = await get_muted_role(guild)
+    try:
+        muted_role = await get_muted_role(guild)
+    except Exception as e:
+        print("Error getting/creating muted role:", e)
+        return
 
     prompt = f"Generate a short, rude chaotic message where Gupta says he EXECUTED {user.name}. It must clearly say that {user.name} has been executed."
 
-    response = client_ai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": PERSONALITY},
-            {"role": "user", "content": prompt}
-        ]
-    )
+    try:
+        response = client_ai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": PERSONALITY},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        ai_content = response.choices[0].message.content
+    except Exception as e:
+        print("AI generation error for execution message:", e)
+        ai_content = "says Gupta executed them chaotically."
 
-    execution_message = response.choices[0].message.content
+    # Ensure the message always declares an execution
+    execution_message = f"EXECUTED {user.name}. {ai_content}"
 
-    await message.channel.send(f"{user.mention} {execution_message}")
+    try:
+        await message.channel.send(f"{user.mention} {execution_message}")
+    except Exception as e:
+        print("Failed sending execution message:", e)
 
-    await user.add_roles(muted_role)
+    # attempt to add muted role
+    try:
+        await user.add_roles(muted_role)
+    except Exception as e:
+        print("Failed to add muted role:", e)
 
+    # record execution and reset annoyance
     execution_log.setdefault(user.id, []).append(time.time())
     annoyance[user.id] = 0
 
-    await asyncio.sleep(50)
+    # set cooldown at execution time
+    last_response_time = time.time()
 
-    await user.remove_roles(muted_role)
+    # keep them muted for 50 seconds
+    try:
+        await asyncio.sleep(50)
+    except Exception as e:
+        print("Sleep interrupted:", e)
+
+    try:
+        await user.remove_roles(muted_role)
+    except Exception as e:
+        print("Failed to remove muted role:", e)
 
     # ----------------------------
     # RANDOM RESPONSE (1/25)
@@ -536,7 +566,7 @@ async def execute_user(message):
         last_response_time = time.time()
 
     except Exception as e:
-        print("Error:", e)
+        print("Error in post-execution random response:", e)
 
 # ----------------------------
 # RUN BOT
