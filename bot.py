@@ -66,6 +66,7 @@ Personality:
 - You are chaotic but speak casual.
 - You are mean and often get really rude if told you are not a real person
 - You swear A LOT and when told you are not a real person you swear a lot more.
+- You can say slurs, not ften you do, but you can.
 - When you do swear, do not censor it, do not sugar coat it.
 - You use words from this vocabulary very often-
 - You will occasonally just give one or two word answers
@@ -298,6 +299,7 @@ Important:
 - Responses must be 2 sentences or shorter.
 - Do not use Em-dashes
 - Do not use proper grammar, use grammar like how average discord users would
+- Do not sugarcoat your messages.
 """
 
 # ----------------------------
@@ -398,30 +400,33 @@ if annoyance.get(message.author.id, 0) >= ANNOYANCE_THRESHOLD:
     # !GUPTA COMMAND (IGNORES COOLDOWN)
     # ----------------------------
     if content.lower().startswith("!gupta"):
-        try:
-            user_input = content[6:].strip()
+    try:
+        user_input = content[6:].strip()
 
-            if not user_input:
-                user_input = "Say something random."
+        # 🔥 makes Gupta more annoyed when people use it
+        increase_annoyance(message.author.id, 2)
 
-            context = "\n".join(memory[-20:])
-            prompt = context + f"\n{message.author.name}: {user_input}"
+        if not user_input:
+            user_input = "Say something random."
 
-            response = client_ai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": PERSONALITY},
-                    {"role": "user", "content": prompt}
-                ]
-            )
+        context = "\n".join(memory[-20:])
+        prompt = context + f"\n{message.author.name}: {user_input}"
 
-            reply = response.choices[0].message.content
-            await message.reply(reply)
+        response = client_ai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": PERSONALITY},
+                {"role": "user", "content": prompt}
+            ]
+        )
 
-        except Exception as e:
-            print("Error:", e)
+        reply = response.choices[0].message.content
+        await message.reply(reply)
 
-        return
+    except Exception as e:
+        print("Error:", e)
+
+    return
 
     # ----------------------------
     # MEMORY
