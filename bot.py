@@ -412,7 +412,7 @@ async def on_message(message):
         try:
             profile = get_user_profile(message.author.id)
             if profile.get("scrimbucks", 0) < 50:
-                await message.channel.send("Gupta says you are too poor in personality.")
+                await message.channel.send("No bruh you broke ass nigga.")
                 return
 
             deduct_scrimbucks(message.author.id, 50)
