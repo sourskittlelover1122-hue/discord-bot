@@ -4,6 +4,7 @@ import random
 import threading
 import time
 import asyncio
+import json
 from types import SimpleNamespace
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -40,6 +41,9 @@ intents.members = True
 
 client = discord.Client(intents=intents)
 
+DATA_FILE = "scrimbucks.json"
+economy_data = {}
+
 memory = []
 
 GAMES = [
@@ -53,6 +57,141 @@ GAMES = [
     "Jerkmate ranked",
     "join VC"
 ]
+
+# ----------------------------
+# SCRIMBUCKS ECONOMY STORAGE
+# ----------------------------
+
+def load_economy_data():
+    global economy_data
+    if not os.path.exists(DATA_FILE):
+        economy_data = {"users": {}, "pending_title_purchases": {}}
+        save_economy_data()
+        return
+
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            economy_data = json.load(f)
+    except Exception:
+        economy_data = {"users": {}, "pending_title_purchases": {}}
+
+
+def save_economy_data():
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(economy_data, f, indent=2)
+
+
+def get_user_profile(user_id):
+    key = str(user_id)
+    users = economy_data.setdefault("users", {})
+    profile = users.get(key)
+    if profile is None:
+        profile = {"user_id": user_id, "scrimbucks": 0, "title": None, "nice_mode_remaining": 0}
+        users[key] = profile
+        save_economy_data()
+    return profile
+
+
+def add_scrimbucks(user_id, amount=1):
+    profile = get_user_profile(user_id)
+    profile["scrimbucks"] = profile.get("scrimbucks", 0) + amount
+    save_economy_data()
+    return profile["scrimbucks"]
+
+
+def deduct_scrimbucks(user_id, amount):
+    profile = get_user_profile(user_id)
+    if profile.get("scrimbucks", 0) < amount:
+        return False
+    profile["scrimbucks"] -= amount
+    save_economy_data()
+    return True
+
+
+def set_title(user_id, title):
+    profile = get_user_profile(user_id)
+    profile["title"] = title
+    save_economy_data()
+
+
+def set_nice_mode(user_id, remaining):
+    profile = get_user_profile(user_id)
+    profile["nice_mode_remaining"] = remaining
+    save_economy_data()
+
+
+def decrement_nice_mode(user_id):
+    profile = get_user_profile(user_id)
+    remaining = profile.get("nice_mode_remaining", 0)
+    if remaining > 0:
+        profile["nice_mode_remaining"] = remaining - 1
+        save_economy_data()
+
+
+def get_pending_title_request(user_id):
+    return economy_data.setdefault("pending_title_purchases", {}).get(str(user_id))
+
+
+def set_pending_title_request(user_id, requested_title, cost):
+    economy_data.setdefault("pending_title_purchases", {})[str(user_id)] = {
+        "user_id": user_id,
+        "requested_title": requested_title,
+        "cost": cost,
+    }
+    save_economy_data()
+
+
+def clear_pending_title_request(user_id):
+    economy_data.setdefault("pending_title_purchases", {}).pop(str(user_id), None)
+    save_economy_data()
+
+
+def build_user_injection(user_id):
+    profile = get_user_profile(user_id)
+    title = profile.get("title") or "None"
+    scrimbucks = profile.get("scrimbucks", 0)
+    remaining = profile.get("nice_mode_remaining", 0)
+    lines = [
+        f"User has {scrimbucks} Scrimbucks.",
+        f"Title: {title}.",
+        f"Nice mode remaining: {remaining}.",
+    ]
+    if remaining > 0:
+        lines.append("You are in Gupta Nice Mode for this user: use an overly nice, supportive, friendly tone for the next 5 responses.")
+    return "\n".join(lines)
+
+
+def build_title_reference(user_id, name):
+    profile = get_user_profile(user_id)
+    title = profile.get("title")
+    if title:
+        return f"{title} {name}"
+    return name
+
+
+def get_ai_response(user_id, prompt, extra_system=None):
+    system_messages = [
+        {"role": "system", "content": PERSONALITY},
+    ]
+    if extra_system:
+        system_messages.append({"role": "system", "content": extra_system})
+    system_messages.append({"role": "system", "content": build_user_injection(user_id)})
+    try:
+        response = client_ai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=system_messages + [{"role": "user", "content": prompt}]
+        )
+        reply = response.choices[0].message.content
+    except Exception as e:
+        print("AI response error:", e)
+        reply = "Gupta is too chaotic to answer right now."
+
+    if get_user_profile(user_id).get("nice_mode_remaining", 0) > 0:
+        decrement_nice_mode(user_id)
+
+    return reply
+
+load_economy_data()
 
 # 🔥 COOLDOWN SYSTEM
 last_response_time = 0
@@ -215,7 +354,11 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    # add scrimbucks before command processing
+    add_scrimbucks(message.author.id, 1)
+
     content = message.content
+    content_lower = content.lower()
 
     # ----------------------------
     # !MIMICGUPTA COMMAND
@@ -241,7 +384,7 @@ async def on_message(message):
     # ----------------------------
     # !GUPTA COMMAND (IGNORES COOLDOWN)
     # ----------------------------
-    if content.lower().startswith("!gupta"):
+    if content_lower.startswith("!gupta"):
         try:
             user_input = content[6:].strip()
 
@@ -251,23 +394,94 @@ async def on_message(message):
             if not user_input:
                 user_input = "Say something random."
 
+            author_name = build_title_reference(message.author.id, message.author.name)
             context = "\n".join(memory[-20:])
-            prompt = context + f"\n{message.author.name}: {user_input}"
+            prompt = context + f"\n{author_name}: {user_input}"
 
-            response = client_ai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": PERSONALITY},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-
-            reply = response.choices[0].message.content
+            reply = get_ai_response(message.author.id, prompt, extra_system="Use the user's title occasionally if they have one.")
             await message.reply(reply)
 
         except Exception as e:
             print("Error:", e)
 
+        return
+
+    # ----------------------------
+    # !BUYGUPTA COMMAND
+    if content_lower.startswith("!buygupta"):
+        try:
+            profile = get_user_profile(message.author.id)
+            if profile.get("scrimbucks", 0) < 50:
+                await message.channel.send("Gupta says you are too poor in personality.")
+                return
+
+            deduct_scrimbucks(message.author.id, 50)
+            set_nice_mode(message.author.id, 5)
+            await message.channel.send("Gupta says Nice Mode activated. Next 5 responses are extra friendly and supportive.")
+        except Exception as e:
+            print("BuyGupta error:", e)
+        return
+
+    # ----------------------------
+    # !BUYTITLE COMMAND
+    if content_lower.startswith("!buytitle "):
+        try:
+            title_request = content[len("!buytitle"):].strip()
+            if not title_request:
+                await message.channel.send("Usage: !BuyTitle <title>")
+                return
+
+            cost = min(200, max(20, len(title_request) * 4 + random.randint(-10, 30)))
+            set_pending_title_request(message.author.id, title_request, cost)
+            await message.channel.send(f"Gupta says the title '{title_request}' costs {cost} Scrimbucks. Say !BuyTitleyes to confirm.")
+        except Exception as e:
+            print("BuyTitle error:", e)
+        return
+
+    if content_lower.startswith("!buytitleyes"):
+        try:
+            pending = get_pending_title_request(message.author.id)
+            if not pending:
+                await message.channel.send("Gupta says you have no title request pending.")
+                return
+
+            cost = pending.get("cost", 0)
+            if get_user_profile(message.author.id).get("scrimbucks", 0) < cost:
+                await message.channel.send("Gupta says you're broke, can't afford that title.")
+                return
+
+            deduct_scrimbucks(message.author.id, cost)
+            set_title(message.author.id, pending.get("requested_title"))
+            clear_pending_title_request(message.author.id)
+            await message.channel.send("Gupta says title saved. Your new title is locked in.")
+        except Exception as e:
+            print("BuyTitleyes error:", e)
+        return
+
+    # ----------------------------
+    # !SCRIMBUCK COMMAND
+    if content_lower.startswith("!scrimbuck"):
+        try:
+            balance = get_user_profile(message.author.id).get("scrimbucks", 0)
+            await message.channel.send(f"You have {balance} Scrimbucks")
+        except Exception as e:
+            print("Scrimbuck error:", e)
+        return
+
+    # ----------------------------
+    # !FLEXSCRIMBUCK COMMAND
+    if content_lower.startswith("!flexscrimbuck"):
+        try:
+            balance = get_user_profile(message.author.id).get("scrimbucks", 0)
+            author_name = build_title_reference(message.author.id, message.author.name)
+            if balance >= 50:
+                prompt = f"{author_name} is flexing their wealth. Respond as Gupta in an impressed tone with slang and personality."
+            else:
+                prompt = f"{author_name} tried to flex but is broke. Respond as Gupta in a mocking tone with slang and personality."
+            reply = get_ai_response(message.author.id, prompt, extra_system="This command is a wealth flex check. Use the user's title if available.")
+            await message.reply(reply)
+        except Exception as e:
+            print("FlexScrimbuck error:", e)
         return
 
     # ----------------------------
