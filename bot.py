@@ -417,7 +417,7 @@ async def on_message(message):
 
             deduct_scrimbucks(message.author.id, 50)
             set_nice_mode(message.author.id, 5)
-            await message.channel.send("Gupta says Nice Mode activated. Next 5 responses are extra friendly and supportive.")
+            await message.channel.send("Alright Niggaaaaaaaaaa, we are best friends for my next 5 responses.")
         except Exception as e:
             print("BuyGupta error:", e)
         return
@@ -433,7 +433,7 @@ async def on_message(message):
 
             cost = min(200, max(20, len(title_request) * 4 + random.randint(-10, 30)))
             set_pending_title_request(message.author.id, title_request, cost)
-            await message.channel.send(f"Gupta says the title '{title_request}' costs {cost} Scrimbucks. Say !BuyTitleyes to confirm.")
+            await message.channel.send(f"You really wanna buy that title huh nigga, it will cost '{title_request}' costs {cost} Scrimbucks. Say !BuyTitleyes to confirm nigga.")
         except Exception as e:
             print("BuyTitle error:", e)
         return
@@ -442,18 +442,18 @@ async def on_message(message):
         try:
             pending = get_pending_title_request(message.author.id)
             if not pending:
-                await message.channel.send("Gupta says you have no title request pending.")
+                await message.channel.send("Boi you have no title request pending.")
                 return
 
             cost = pending.get("cost", 0)
             if get_user_profile(message.author.id).get("scrimbucks", 0) < cost:
-                await message.channel.send("Gupta says you're broke, can't afford that title.")
+                await message.channel.send("No bruh you broke ass nigga, can't afford that title.")
                 return
 
             deduct_scrimbucks(message.author.id, cost)
             set_title(message.author.id, pending.get("requested_title"))
             clear_pending_title_request(message.author.id)
-            await message.channel.send("Gupta says title saved. Your new title is locked in.")
+            await message.channel.send("Cool as title nigga. Your new title is locked in.")
         except Exception as e:
             print("BuyTitleyes error:", e)
         return
