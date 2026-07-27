@@ -98,7 +98,8 @@ GAMES = [
     "Warframe",
     "Arcane Odyssey",
     "Jerkmate ranked",
-    "join VC",
+    "join VC"
+    "Hell Divers 2",
 ]
 
 # ----------------------------
@@ -185,6 +186,7 @@ def should_process_message(message):
 
 
 NORMAL_REPLY_CHANCE = 0.01
+DIRECT_ADDRESS_REPLY_CHANCE = 0.15
 
 
 def get_command_name(content):
@@ -209,12 +211,15 @@ def should_respond_to_message(message, content_lower=None, rng=None):
     if not content_lower or content_lower.startswith("!"):
         return False
 
+    if rng is None:
+        rng = random.random
+
     bot_id = getattr(client.user, "id", None)
     if bot_id is not None:
         mention = f"<@{bot_id}>"
         mention_nick = f"<@!{bot_id}>"
         if mention in content_lower or mention_nick in content_lower:
-            return True
+            return rng() < DIRECT_ADDRESS_REPLY_CHANCE
 
     author_name = getattr(getattr(message, "author", None), "name", None)
     direct_address_bonus = 0.0
@@ -224,7 +229,7 @@ def should_respond_to_message(message, content_lower=None, rng=None):
             direct_address_bonus = 0.03
 
     if "gupta" in content_lower:
-        return True
+        return rng() < DIRECT_ADDRESS_REPLY_CHANCE + direct_address_bonus
 
     if "?" in getattr(message, "content", "") or "!" in getattr(message, "content", ""):
         return True
@@ -324,6 +329,7 @@ def build_gupta_reply_prompt(message, content_lower):
     return (
         f"Reply to {message.author.name} in a short chaotic Discord message. "
         f"Keep it 1-2 sentences, casual, rude, and natural. "
+        f"Do not use good grammar and make a few typos"
         f"Make the reply feel relevant to the topic '{topic_hint}'. "
         f"Use the conversation context and sound like a real Discord user."
         f"{context_suffix}\nCurrent message: {message.content}"
@@ -363,6 +369,9 @@ Personality:
 - You will occasonally just give one or two word answers
 - You will sometimes make typos when speaking
 - You will sometimes use internet slang and abbreviations
+- You will sometimes use emojis in your messages
+- You will sometimes use all caps in your messages
+- Yo will sometimes make typos
 - Often when someone asks you a question you won't answer it, you would just tell them to figure it out or something similar.
 when using these words and phrases, do not say the 1s that are attached to some of them
 Jordy 
@@ -429,7 +438,7 @@ Call
 Why are veggies so good?
 Swimmers
 
-You also enjoy references to JJK, JJBA, and Warframe.
+You also enjoy references to JJK, JJBA, Warframe, and Helldivers 2.
 
 Important:
 - Stay in character as Gupta at all times.
@@ -577,7 +586,6 @@ async def on_message(message):
 
             await target_message.delete()
             gupta_message_lookup.pop(message_id, None)
-            await send_gupta_reply(message, f"Deleted Gupta message {message_id}.")
             await message.delete()
         except Exception as e:
             print("GDel error:", e)
@@ -599,7 +607,6 @@ async def on_message(message):
                 return
 
             await target_message.edit(content=new_text)
-            await send_gupta_reply(message, f"Updated Gupta message {message_id}.")
             await message.delete()
         except Exception as e:
             print("GEdit error:", e)
@@ -626,7 +633,6 @@ async def on_message(message):
 
             new_text = rewrite_message_for_emotion(target_message.content, emotion)
             await target_message.edit(content=new_text)
-            await send_gupta_reply(message, f"Changed Gupta message {message_id} to express {emotion}.")
             await message.delete()
         except Exception as e:
             print("GuptaChange error:", e)

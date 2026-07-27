@@ -55,7 +55,14 @@ class ReplyLogicTests(unittest.TestCase):
             author=SimpleNamespace(bot=False),
             content="Gupta come here",
         )
-        self.assertTrue(module.should_respond_to_message(message, "gupta come here", rng=lambda: 0.99))
+        self.assertTrue(module.should_respond_to_message(message, "gupta come here", rng=lambda: 0.05))
+
+    def test_direct_address_messages_are_less_likely_to_trigger_reply(self):
+        message = SimpleNamespace(
+            author=SimpleNamespace(bot=False),
+            content="gupta come here",
+        )
+        self.assertFalse(module.should_respond_to_message(message, "gupta come here", rng=lambda: 0.9))
 
     def test_casual_chat_can_trigger_reply(self):
         message = SimpleNamespace(
