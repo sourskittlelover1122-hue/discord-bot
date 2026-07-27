@@ -46,6 +46,8 @@ client = discord.Client(intents=intents)
 
 memory = []
 user_memory = {}
+direct_address_memory = {}
+processed_message_ids = {}
 
 REPLY_TOKENS = {
     "hey",
@@ -165,6 +167,23 @@ def get_ai_response(prompt):
         return "Gupta is too chaotic to answer right now."
 
 
+def should_process_message(message):
+    if message is None:
+        return False
+
+    message_id = getattr(message, "id", None)
+    if message_id is None:
+        return True
+
+    now = time.time()
+    expires_at = processed_message_ids.get(message_id)
+    if expires_at and expires_at > now:
+        return False
+
+    processed_message_ids[message_id] = now + 30
+    return True
+
+
 def should_respond_to_message(message, content_lower=None, rng=None):
     if message is None or getattr(message.author, "bot", False):
         return False
@@ -182,6 +201,12 @@ def should_respond_to_message(message, content_lower=None, rng=None):
         if mention in content_lower or mention_nick in content_lower:
             return True
 
+    author_name = getattr(getattr(message, "author", None), "name", None)
+    if author_name:
+        direct_entry = direct_address_memory.get(author_name)
+        if direct_entry and direct_entry.get("expires_at", 0) > time.time():
+            return True
+
     if "gupta" in content_lower:
         return True
 
@@ -197,7 +222,7 @@ def should_respond_to_message(message, content_lower=None, rng=None):
     if rng is None:
         rng = random.random
 
-    return rng() < 0.22
+    return rng() < 0.10
 
 
 def extract_topic_keywords(text):
@@ -256,10 +281,10 @@ def build_memory_context(message, content_lower):
 
     for entry in reversed(user_memory.get(message.author.name, [])):
         relevant.append(f"{entry['author']}: {entry['content']}")
-        if len(relevant) >= 4:
+        if len(relevant) >= 3:
             break
 
-    if len(relevant) < 4:
+    if len(relevant) < 3:
         for entry in reversed(memory):
             entry_text = entry.get("content", "")
             if not entry_text:
@@ -269,7 +294,7 @@ def build_memory_context(message, content_lower):
                 continue
             if not keywords or any(keyword in entry_lower for keyword in keywords):
                 relevant.append(f"{entry['author']}: {entry_text}")
-            if len(relevant) >= 6:
+            if len(relevant) >= 5:
                 break
 
     if not relevant:
@@ -308,7 +333,7 @@ def rewrite_message_for_emotion(text, emotion):
 
 # 🔥 COOLDOWN SYSTEM
 last_response_time = 0
-COOLDOWN = 12  # 12 seconds
+COOLDOWN = 20  # 20 seconds
 
 PERSONALITY = """
 You are a real person named Gupta.
@@ -460,6 +485,9 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    if not should_process_message(message):
+        return
+
     content = message.content
     content_lower = content.lower().strip()
 
@@ -582,6 +610,11 @@ async def on_message(message):
     # MEMORY
     # ----------------------------
     remember_message(message)
+
+    if content_lower and "gupta" in content_lower:
+        direct_address_memory[message.author.name] = {"expires_at": time.time() + 90}
+    elif message.content and message.content.startswith(("hey gupta", "gupta", "yo gupta")):
+        direct_address_memory[message.author.name] = {"expires_at": time.time() + 90}
 
     # ----------------------------
     # COOLDOWN CHECK

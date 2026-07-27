@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import time
 import types
 import unittest
 from pathlib import Path
@@ -74,6 +75,19 @@ class ReplyLogicTests(unittest.TestCase):
         rewritten = module.rewrite_message_for_emotion("yo wanna play Minecraft tonight", "angry")
         self.assertIn("Minecraft", rewritten)
         self.assertIn("angry", rewritten.lower())
+
+    def test_recent_direct_address_increases_reply_likelihood(self):
+        module.direct_address_memory["alice"] = {"expires_at": time.time() + 60}
+        message = SimpleNamespace(
+            author=SimpleNamespace(bot=False, name="alice"),
+            content="yeah",
+        )
+        self.assertTrue(module.should_respond_to_message(message, "yeah", rng=lambda: 0.99))
+
+    def test_duplicate_message_ids_are_suppressed(self):
+        message = SimpleNamespace(id=9991, author=SimpleNamespace(bot=False))
+        self.assertTrue(module.should_process_message(message))
+        self.assertFalse(module.should_process_message(message))
 
 
 if __name__ == "__main__":
