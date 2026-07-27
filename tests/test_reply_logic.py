@@ -1,0 +1,80 @@
+import importlib.util
+import sys
+import types
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+# Stub external modules so bot.py can be imported in a lightweight test environment.
+discord_stub = types.ModuleType("discord")
+class Intents:
+    def __init__(self):
+        self.message_content = False
+        self.members = False
+
+    @classmethod
+    def default(cls):
+        return cls()
+
+class Client:
+    def __init__(self, *args, **kwargs):
+        self.user = None
+
+    def event(self, func):
+        return func
+
+    def run(self, *args, **kwargs):
+        return None
+
+discord_stub.Intents = Intents
+discord_stub.Client = Client
+sys.modules.setdefault("discord", discord_stub)
+
+dotenv_stub = types.ModuleType("dotenv")
+dotenv_stub.load_dotenv = lambda *args, **kwargs: None
+sys.modules.setdefault("dotenv", dotenv_stub)
+
+flask_stub = types.ModuleType("flask")
+flask_stub.Flask = lambda *args, **kwargs: types.SimpleNamespace(route=lambda *a, **k: (lambda f: f))
+sys.modules.setdefault("flask", flask_stub)
+
+openai_stub = types.ModuleType("openai")
+openai_stub.OpenAI = lambda *args, **kwargs: None
+sys.modules.setdefault("openai", openai_stub)
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "bot.py"
+spec = importlib.util.spec_from_file_location("discord_bot", MODULE_PATH)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+
+class ReplyLogicTests(unittest.TestCase):
+    def test_direct_mentions_trigger_reply(self):
+        message = SimpleNamespace(
+            author=SimpleNamespace(bot=False),
+            content="Gupta come here",
+        )
+        self.assertTrue(module.should_respond_to_message(message, "gupta come here", rng=lambda: 0.99))
+
+    def test_casual_chat_can_trigger_reply(self):
+        message = SimpleNamespace(
+            author=SimpleNamespace(bot=False),
+            content="yo bro what are you doing",
+        )
+        self.assertTrue(module.should_respond_to_message(message, "yo bro what are you doing", rng=lambda: 0.05))
+
+    def test_commands_do_not_trigger_reply(self):
+        message = SimpleNamespace(
+            author=SimpleNamespace(bot=False),
+            content="!gupta hello",
+        )
+        self.assertFalse(module.should_respond_to_message(message, "!gupta hello", rng=lambda: 0.05))
+
+    def test_emotion_rewrite_preserves_topic_context(self):
+        rewritten = module.rewrite_message_for_emotion("yo wanna play Minecraft tonight", "angry")
+        self.assertIn("Minecraft", rewritten)
+        self.assertIn("angry", rewritten.lower())
+
+
+if __name__ == "__main__":
+    unittest.main()

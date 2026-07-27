@@ -1,28 +1,31 @@
-import discord
+﻿import asyncio
 import os
 import random
+import re
 import threading
 import time
-import asyncio
-import json
-from types import SimpleNamespace
+import discord
 from dotenv import load_dotenv
-from openai import OpenAI
 from flask import Flask
+from openai import OpenAI
 
 # ----------------------------
 # KEEP-ALIVE WEB SERVER
 # ----------------------------
 app = Flask(__name__)
 
+
 @app.route("/")
 def home():
     return "Bot is alive"
 
+
 def run_web():
     app.run(host="0.0.0.0", port=8080)
 
-threading.Thread(target=run_web).start()
+
+if __name__ == "__main__":
+    threading.Thread(target=run_web, daemon=True).start()
 
 # ----------------------------
 # LOAD ENV
@@ -41,10 +44,48 @@ intents.members = True
 
 client = discord.Client(intents=intents)
 
-DATA_FILE = "scrimbucks.json"
-economy_data = {}
-
 memory = []
+user_memory = {}
+
+REPLY_TOKENS = {
+    "hey",
+    "hi",
+    "yo",
+    "sup",
+    "bro",
+    "dude",
+    "man",
+    "lol",
+    "lmao",
+    "wtf",
+    "damn",
+    "pls",
+    "please",
+    "play",
+    "join",
+    "chat",
+    "talk",
+    "fr",
+    "real",
+    "nah",
+    "ok",
+    "kk",
+    "cool",
+    "wanna",
+    "want",
+    "what",
+    "why",
+    "when",
+    "where",
+    "who",
+    "how",
+    "can",
+    "you",
+    "u",
+    "need",
+    "help",
+    "hello",
+}
 
 GAMES = [
     "Minecraft",
@@ -55,147 +96,219 @@ GAMES = [
     "Warframe",
     "Arcane Odyssey",
     "Jerkmate ranked",
-    "join VC"
+    "join VC",
 ]
 
 # ----------------------------
-# SCRIMBUCKS ECONOMY STORAGE
+# GUPTA MESSAGE ID SYSTEM
 # ----------------------------
-
-def load_economy_data():
-    global economy_data
-    if not os.path.exists(DATA_FILE):
-        economy_data = {"users": {}, "pending_title_purchases": {}}
-        save_economy_data()
-        return
-
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            economy_data = json.load(f)
-    except Exception:
-        economy_data = {"users": {}, "pending_title_purchases": {}}
+gupta_message_counter = 0
+gupta_message_lookup = {}
 
 
-def save_economy_data():
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(economy_data, f, indent=2)
+def format_gupta_message_id(counter):
+    return f"{counter:04d}"
 
 
-def get_user_profile(user_id):
-    key = str(user_id)
-    users = economy_data.setdefault("users", {})
-    profile = users.get(key)
-    if profile is None:
-        profile = {"user_id": user_id, "scrimbucks": 0, "title": None, "nice_mode_remaining": 0}
-        users[key] = profile
-        save_economy_data()
-    return profile
+async def track_gupta_message(message):
+    global gupta_message_counter
+    gupta_message_counter += 1
+    message_id = format_gupta_message_id(gupta_message_counter)
+    gupta_message_lookup[message_id] = message
+    return message_id
 
 
-def add_scrimbucks(user_id, amount=1):
-    profile = get_user_profile(user_id)
-    profile["scrimbucks"] = profile.get("scrimbucks", 0) + amount
-    save_economy_data()
-    return profile["scrimbucks"]
+async def send_gupta_message(destination, content, *, reference=None):
+    if reference is not None:
+        sent_message = await destination.send(content, reference=reference)
+    else:
+        sent_message = await destination.send(content)
+    await track_gupta_message(sent_message)
+    return sent_message
 
 
-def deduct_scrimbucks(user_id, amount):
-    profile = get_user_profile(user_id)
-    if profile.get("scrimbucks", 0) < amount:
-        return False
-    profile["scrimbucks"] -= amount
-    save_economy_data()
-    return True
+async def send_gupta_reply(message, content):
+    sent_message = await message.reply(content)
+    await track_gupta_message(sent_message)
+    return sent_message
 
 
-def set_title(user_id, title):
-    profile = get_user_profile(user_id)
-    profile["title"] = title
-    save_economy_data()
+async def get_referenced_message(message):
+    if not message.reference:
+        return None
+
+    resolved = getattr(message.reference, "resolved", None)
+    if resolved is not None:
+        return resolved
+
+    if getattr(message.reference, "message_id", None):
+        try:
+            return await message.channel.fetch_message(message.reference.message_id)
+        except Exception:
+            return None
+
+    return None
 
 
-def set_nice_mode(user_id, remaining):
-    profile = get_user_profile(user_id)
-    profile["nice_mode_remaining"] = remaining
-    save_economy_data()
-
-
-def decrement_nice_mode(user_id):
-    profile = get_user_profile(user_id)
-    remaining = profile.get("nice_mode_remaining", 0)
-    if remaining > 0:
-        profile["nice_mode_remaining"] = remaining - 1
-        save_economy_data()
-
-
-def get_pending_title_request(user_id):
-    return economy_data.setdefault("pending_title_purchases", {}).get(str(user_id))
-
-
-def set_pending_title_request(user_id, requested_title, cost):
-    economy_data.setdefault("pending_title_purchases", {})[str(user_id)] = {
-        "user_id": user_id,
-        "requested_title": requested_title,
-        "cost": cost,
-    }
-    save_economy_data()
-
-
-def clear_pending_title_request(user_id):
-    economy_data.setdefault("pending_title_purchases", {}).pop(str(user_id), None)
-    save_economy_data()
-
-
-def build_user_injection(user_id):
-    profile = get_user_profile(user_id)
-    title = profile.get("title") or "None"
-    scrimbucks = profile.get("scrimbucks", 0)
-    remaining = profile.get("nice_mode_remaining", 0)
-    lines = [
-        f"User has {scrimbucks} Scrimbucks.",
-        f"Title: {title}.",
-        f"Nice mode remaining: {remaining}.",
-    ]
-    if remaining > 0:
-        lines.append("You are in Gupta Nice Mode for this user: use an overly nice, supportive, friendly tone for the next 5 responses.")
-    return "\n".join(lines)
-
-
-def build_title_reference(user_id, name):
-    profile = get_user_profile(user_id)
-    title = profile.get("title")
-    if title:
-        return f"{title} {name}"
-    return name
-
-
-def get_ai_response(user_id, prompt, extra_system=None):
-    system_messages = [
-        {"role": "system", "content": PERSONALITY},
-    ]
-    if extra_system:
-        system_messages.append({"role": "system", "content": extra_system})
-    system_messages.append({"role": "system", "content": build_user_injection(user_id)})
+def get_ai_response(prompt):
     try:
         response = client_ai.chat.completions.create(
             model="gpt-4o-mini",
-            messages=system_messages + [{"role": "user", "content": prompt}]
+            messages=[
+                {"role": "system", "content": PERSONALITY},
+                {"role": "user", "content": prompt},
+            ],
         )
-        reply = response.choices[0].message.content
+        return response.choices[0].message.content
     except Exception as e:
         print("AI response error:", e)
-        reply = "Gupta is too chaotic to answer right now."
+        return "Gupta is too chaotic to answer right now."
 
-    if get_user_profile(user_id).get("nice_mode_remaining", 0) > 0:
-        decrement_nice_mode(user_id)
 
-    return reply
+def should_respond_to_message(message, content_lower=None, rng=None):
+    if message is None or getattr(message.author, "bot", False):
+        return False
 
-load_economy_data()
+    if content_lower is None:
+        content_lower = (getattr(message, "content", "") or "").strip().lower()
+
+    if not content_lower or content_lower.startswith("!"):
+        return False
+
+    bot_id = getattr(client.user, "id", None)
+    if bot_id is not None:
+        mention = f"<@{bot_id}>"
+        mention_nick = f"<@!{bot_id}>"
+        if mention in content_lower or mention_nick in content_lower:
+            return True
+
+    if "gupta" in content_lower:
+        return True
+
+    if any(token in content_lower for token in REPLY_TOKENS):
+        return True
+
+    if "?" in getattr(message, "content", "") or "!" in getattr(message, "content", ""):
+        return True
+
+    if len(content_lower.split()) <= 2:
+        return False
+
+    if rng is None:
+        rng = random.random
+
+    return rng() < 0.22
+
+
+def extract_topic_keywords(text):
+    words = re.findall(r"[a-zA-Z]{3,}", text.lower())
+    stopwords = {
+        "gupta",
+        "the",
+        "that",
+        "this",
+        "with",
+        "from",
+        "have",
+        "been",
+        "what",
+        "when",
+        "where",
+        "why",
+        "how",
+        "your",
+        "their",
+        "them",
+        "there",
+        "about",
+        "would",
+        "could",
+        "should",
+        "want",
+        "wanna",
+        "just",
+        "really",
+        "into",
+        "then",
+        "than",
+    }
+    return [word for word in words if word not in stopwords][:6]
+
+
+def remember_message(message):
+    entry = {"author": message.author.name, "content": message.content}
+    memory.append(entry)
+    if len(memory) > 80:
+        memory.pop(0)
+
+    user_memory.setdefault(message.author.name, [])
+    user_memory[message.author.name].append(entry)
+    if len(user_memory[message.author.name]) > 8:
+        user_memory[message.author.name] = user_memory[message.author.name][-8:]
+
+
+def build_memory_context(message, content_lower):
+    if not memory:
+        return ""
+
+    keywords = extract_topic_keywords(content_lower)
+    relevant = []
+
+    for entry in reversed(user_memory.get(message.author.name, [])):
+        relevant.append(f"{entry['author']}: {entry['content']}")
+        if len(relevant) >= 4:
+            break
+
+    if len(relevant) < 4:
+        for entry in reversed(memory):
+            entry_text = entry.get("content", "")
+            if not entry_text:
+                continue
+            entry_lower = entry_text.lower()
+            if entry.get("author") == message.author.name:
+                continue
+            if not keywords or any(keyword in entry_lower for keyword in keywords):
+                relevant.append(f"{entry['author']}: {entry_text}")
+            if len(relevant) >= 6:
+                break
+
+    if not relevant:
+        return ""
+
+    return "Recent chat context:\n" + "\n".join(reversed(relevant))
+
+
+def build_gupta_reply_prompt(message, content_lower):
+    context = build_memory_context(message, content_lower)
+    topic_keywords = extract_topic_keywords(content_lower)
+    topic_hint = ", ".join(topic_keywords[:4]) if topic_keywords else "the chat"
+    context_suffix = f"\n{context}" if context else ""
+    return (
+        f"Reply to {message.author.name} in a short chaotic Discord message. "
+        f"Keep it 1-2 sentences, casual, rude, and natural. "
+        f"Make the reply feel relevant to the topic '{topic_hint}'. "
+        f"Use the conversation context and sound like a real Discord user."
+        f"{context_suffix}\nCurrent message: {message.content}"
+    )
+
+
+def rewrite_message_for_emotion(text, emotion):
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    if not cleaned:
+        return f"I feel {emotion} right now."
+
+    emotion_value = (emotion or "angry").strip().lower()
+    if emotion_value in {"sad", "angry", "happy", "excited", "anxious"}:
+        emotion_phrase = emotion_value
+    else:
+        emotion_phrase = emotion_value or "weird"
+
+    return f"{cleaned}, and i'm {emotion_phrase} about it."
+
 
 # 🔥 COOLDOWN SYSTEM
 last_response_time = 0
-COOLDOWN = 60  # 1 minute
+COOLDOWN = 12  # 12 seconds
 
 PERSONALITY = """
 You are a real person named Gupta.
@@ -210,6 +323,9 @@ Personality:
 - When you do swear, do not censor it, do not sugar coat it.
 - You use words from this vocabulary very often-
 - You will occasonally just give one or two word answers
+- You will sometimes make typos when speaking
+- You will sometimes use internet slang and abbreviations
+- Often when someone asks you a question you won't answer it, you would just tell them to figure it out or something similar.
 when using these words and phrases, do not say the 1s that are attached to some of them
 Jordy 
 Eddy 
@@ -218,7 +334,7 @@ I need somebody to talk to meeeeheeeeee1
 Nooooo 
 1 Go over there 
 1 Your so mean 
-1 Gang signs Gang signs gang signs 1 
+1 Gang signs Gang signs gang signs 1
 Joshua's older cousin
 Darius bell pepper
 Vahan lore
@@ -297,6 +413,7 @@ async def on_ready():
     print("AI Bot is online!")
     client.loop.create_task(gupta_ping_task())
 
+
 async def gupta_ping_task():
     await client.wait_until_ready()
 
@@ -306,13 +423,9 @@ async def gupta_ping_task():
     while not client.is_closed():
         try:
             for guild in client.guilds:
-                # fetch members properly
                 members = [m for m in guild.members if not m.bot]
 
-                print(f"Found {len(members)} members")  # DEBUG
-
                 if not members:
-                    print("No members found!")
                     continue
 
                 target = random.choice(members)
@@ -320,21 +433,13 @@ async def gupta_ping_task():
 
                 prompt = f"Tell {target.name} to hop on {game} in a chaotic rude way."
 
-                response = client_ai.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": PERSONALITY},
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-
-                reply = response.choices[0].message.content
+                reply = get_ai_response(prompt)
 
                 sent = False
 
                 for channel in guild.text_channels:
                     if channel.permissions_for(guild.me).send_messages:
-                        await channel.send(f"{target.mention} {reply}")
+                        await send_gupta_message(channel, f"{target.mention} {reply}")
                         sent = True
                         break
 
@@ -347,6 +452,7 @@ async def gupta_ping_task():
         # AFTER FIRST RUN → 18 HOURS
         await asyncio.sleep(60 * 60 * 18)
 
+
 @client.event
 async def on_message(message):
     global last_response_time
@@ -354,31 +460,42 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # add scrimbucks before command processing
-    add_scrimbucks(message.author.id, 1)
-
     content = message.content
-    content_lower = content.lower()
+    content_lower = content.lower().strip()
+
+    if content_lower.startswith("!gid"):
+        try:
+            referenced_message = await get_referenced_message(message)
+            if referenced_message and referenced_message.author.id == client.user.id:
+                message_id = None
+                for candidate_id, tracked_message in gupta_message_lookup.items():
+                    if tracked_message.id == referenced_message.id:
+                        message_id = candidate_id
+                        break
+
+                if message_id:
+                    await send_gupta_reply(message, f"That Gupta message ID is {message_id}")
+                else:
+                    await send_gupta_reply(message, "That message is not tracked by Gupta yet.")
+            else:
+                await send_gupta_reply(message, "Reply to one of Gupta's messages with !Gid to get its ID.")
+        except Exception as e:
+            print("Gid error:", e)
+        return
 
     # ----------------------------
     # !MIMICGUPTA COMMAND
     # ----------------------------
-    if content.lower().startswith("!mimicgupta"):
+    if content_lower.startswith("!mimicgupta"):
         try:
             mimic_text = content[len("!mimicgupta"):].strip()
-
             if not mimic_text:
-                return  # don't send empty messages
+                return
 
-            # send the mimic message
-            await message.channel.send(mimic_text)
-
-            # delete original message
+            await send_gupta_message(message.channel, mimic_text)
             await message.delete()
-
         except Exception as e:
             print("Error:", e)
-
         return
 
     # ----------------------------
@@ -387,164 +504,84 @@ async def on_message(message):
     if content_lower.startswith("!gupta"):
         try:
             user_input = content[6:].strip()
-
-            # 🔥 makes Gupta more annoyed when people use it
-            increase_annoyance(message.author.id, 2)
-
             if not user_input:
                 user_input = "Say something random."
 
-            author_name = build_title_reference(message.author.id, message.author.name)
-            context = "\n".join(memory[-20:])
-            prompt = context + f"\n{author_name}: {user_input}"
-
-            reply = get_ai_response(message.author.id, prompt, extra_system="Use the user's title occasionally if they have one.")
-            await message.reply(reply)
-
+            prompt = f"{message.author.name}: {user_input}"
+            reply = get_ai_response(prompt)
+            await send_gupta_reply(message, reply)
         except Exception as e:
             print("Error:", e)
-
         return
 
-    # ----------------------------
-    # !BUYGUPTA COMMAND
-    if content_lower.startswith("!buygupta"):
+    gdel_match = re.match(r"^!gdel\s*(?P<id>\d+)$", content, re.IGNORECASE)
+    if gdel_match:
         try:
-            profile = get_user_profile(message.author.id)
-            if profile.get("scrimbucks", 0) < 50:
-                await message.channel.send("No bruh you broke ass nigga.")
+            message_id = f"{int(gdel_match.group('id')):04d}"
+            target_message = gupta_message_lookup.get(message_id)
+            if target_message is None:
+                await send_gupta_reply(message, f"I do not have a Gupta message with ID {message_id}.")
                 return
 
-            deduct_scrimbucks(message.author.id, 50)
-            set_nice_mode(message.author.id, 5)
-            await message.channel.send("Alright Niggaaaaaaaaaa, we are best friends for my next 5 responses.")
+            await target_message.delete()
+            gupta_message_lookup.pop(message_id, None)
+            await send_gupta_reply(message, f"Deleted Gupta message {message_id}.")
         except Exception as e:
-            print("BuyGupta error:", e)
+            print("GDel error:", e)
+            await send_gupta_reply(message, "I could not delete that Gupta message.")
         return
 
-    # ----------------------------
-    # !BUYTITLE COMMAND
-    if content_lower.startswith("!buytitle "):
+    gedit_match = re.match(r"^!gedit\s*(?P<id>\d+)\s*(?P<text>.*)$", content, re.IGNORECASE)
+    if gedit_match:
         try:
-            title_request = content[len("!buytitle"):].strip()
-            if not title_request:
-                await message.channel.send("Usage: !BuyTitle <title>")
+            message_id = f"{int(gedit_match.group('id')):04d}"
+            target_message = gupta_message_lookup.get(message_id)
+            if target_message is None:
+                await send_gupta_reply(message, f"I do not have a Gupta message with ID {message_id}.")
                 return
 
-            cost = min(200, max(20, len(title_request) * 4 + random.randint(-10, 30)))
-            set_pending_title_request(message.author.id, title_request, cost)
-            await message.channel.send(f"You really wanna buy that title huh nigga, it will cost '{title_request}' costs {cost} Scrimbucks. Say !BuyTitleyes to confirm nigga.")
-        except Exception as e:
-            print("BuyTitle error:", e)
-        return
-
-    if content_lower.startswith("!buytitleyes"):
-        try:
-            pending = get_pending_title_request(message.author.id)
-            if not pending:
-                await message.channel.send("Boi you have no title request pending.")
+            new_text = gedit_match.group('text').strip()
+            if not new_text:
+                await send_gupta_reply(message, "Give me some text to replace the message with.")
                 return
 
-            cost = pending.get("cost", 0)
-            if get_user_profile(message.author.id).get("scrimbucks", 0) < cost:
-                await message.channel.send("No bruh you broke ass nigga, can't afford that title.")
+            await target_message.edit(content=new_text)
+            await send_gupta_reply(message, f"Updated Gupta message {message_id}.")
+        except Exception as e:
+            print("GEdit error:", e)
+            await send_gupta_reply(message, "I could not edit that Gupta message.")
+        return
+
+    gupta_change_match = re.match(
+        r"^!guptachangeyourmind\s*(?P<id>\d+)\s*(?P<emotion>.*)$",
+        content,
+        re.IGNORECASE,
+    )
+    if gupta_change_match:
+        try:
+            message_id = f"{int(gupta_change_match.group('id')):04d}"
+            target_message = gupta_message_lookup.get(message_id)
+            if target_message is None:
+                await send_gupta_reply(message, f"I do not have a Gupta message with ID {message_id}.")
                 return
 
-            deduct_scrimbucks(message.author.id, cost)
-            set_title(message.author.id, pending.get("requested_title"))
-            clear_pending_title_request(message.author.id)
-            await message.channel.send("Cool as title nigga. Your new title is locked in.")
-        except Exception as e:
-            print("BuyTitleyes error:", e)
-        return
-
-    # ----------------------------
-    # !SCRIMBUCK COMMAND
-    if content_lower.startswith("!scrimbuck"):
-        try:
-            balance = get_user_profile(message.author.id).get("scrimbucks", 0)
-            await message.channel.send(f"You have {balance} Scrimbucks")
-        except Exception as e:
-            print("Scrimbuck error:", e)
-        return
-
-    # ----------------------------
-    # !FLEXSCRIMBUCK COMMAND
-    if content_lower.startswith("!flexscrimbuck"):
-        try:
-            balance = get_user_profile(message.author.id).get("scrimbucks", 0)
-            author_name = build_title_reference(message.author.id, message.author.name)
-            if balance >= 50:
-                prompt = f"{author_name} is flexing their wealth. Respond as Gupta in an impressed tone with slang and personality."
-            else:
-                prompt = f"{author_name} tried to flex but is broke. Respond as Gupta in a mocking tone with slang and personality."
-            reply = get_ai_response(message.author.id, prompt, extra_system="This command is a wealth flex check. Use the user's title if available.")
-            await message.reply(reply)
-        except Exception as e:
-            print("FlexScrimbuck error:", e)
-        return
-
-    # ----------------------------
-    # !FEEDTODANTE COMMAND
-    # Usage: !FeedtoDante <username>
-    # Finds the user in the guild and executes them immediately.
-    # ----------------------------
-    if content.lower().startswith("!feedtodante"):
-        try:
-            target_text = content[len("!feedtodante"):].strip()
-
-            if not target_text:
-                await message.channel.send("Usage: !FeedtoDante <username>")
+            emotion = gupta_change_match.group('emotion').strip()
+            if not emotion:
+                await send_gupta_reply(message, "Give me an emotion to rewrite the message with.")
                 return
 
-            guild = message.guild
-            target = None
-
-            # prefer explicit mentions
-            if message.mentions:
-                target = message.mentions[0]
-            else:
-                # match by name or display_name (case-insensitive)
-                for m in guild.members:
-                    if m.name.lower() == target_text.lower() or getattr(m, 'display_name', '').lower() == target_text.lower():
-                        target = m
-                        break
-
-                # try name#discriminator
-                if not target and '#' in target_text:
-                    name, disc = target_text.rsplit('#', 1)
-                    for m in guild.members:
-                        if getattr(m, 'discriminator', None) == disc and m.name == name:
-                            target = m
-                            break
-
-            if not target:
-                await message.channel.send("User not found.")
-                return
-
-            fake_msg = SimpleNamespace(author=target, guild=message.guild, channel=message.channel)
-            await execute_user(fake_msg)
-
+            new_text = rewrite_message_for_emotion(target_message.content, emotion)
+            await target_message.edit(content=new_text)
+            await send_gupta_reply(message, f"Changed Gupta message {message_id} to express {emotion}.")
         except Exception as e:
-            print("FeedtoDante error:", e)
-
+            print("GuptaChange error:", e)
+            await send_gupta_reply(message, "I could not change that Gupta message.")
         return
-
-    # increase annoyance on every message
-    increase_annoyance(message.author.id, 1)
-
-    # check for execution trigger
-    if annoyance.get(message.author.id, 0) >= ANNOYANCE_THRESHOLD:
-        if random.randint(1, 3) == 1:  # adds randomness so it doesn't always trigger
-            await execute_user(message)
 
     # ----------------------------
     # MEMORY
     # ----------------------------
-    memory.append(f"{message.author.name}: {message.content}")
-
-    if len(memory) > 30:
-        memory.pop(0)
+    remember_message(message)
 
     # ----------------------------
     # COOLDOWN CHECK
@@ -552,130 +589,17 @@ async def on_message(message):
     if time.time() - last_response_time < COOLDOWN:
         return
 
-# ----------------------------
-# EXECUTION SYSTEM
-# ----------------------------
-annoyance = {}
-execution_log = {}  # user_id: [timestamps]
-
-ANNOYANCE_THRESHOLD = 10
-EXECUTION_LIMIT = 3
-EXECUTION_WINDOW = 60 * 60 * 12  # 12 hours
-
-
-def increase_annoyance(user_id, amount=1):
-    annoyance[user_id] = annoyance.get(user_id, 0) + amount
-
-
-def can_execute(user_id):
-    now = time.time()
-    logs = execution_log.get(user_id, [])
-
-    # remove old logs outside 12 hours
-    logs = [t for t in logs if now - t < EXECUTION_WINDOW]
-    execution_log[user_id] = logs
-
-    return len(logs) < EXECUTION_LIMIT
-
-
-async def get_muted_role(guild):
-    role = discord.utils.get(guild.roles, name="Muted")
-    if role is None:
-        role = await guild.create_role(name="Muted")
-        for channel in guild.channels:
-            await channel.set_permissions(role, send_messages=False)
-    return role
-
-
-async def execute_user(message):
-    user = message.author
-    guild = message.guild
-    global last_response_time
-
-    if not can_execute(user.id):
-        print(f"Can't execute {user.name}: limit reached")
+    if not should_respond_to_message(message, content_lower):
         return
 
-    try:
-        muted_role = await get_muted_role(guild)
-    except Exception as e:
-        print("Error getting/creating muted role:", e)
-        return
-
-    prompt = f"Generate a short, rude chaotic message where Gupta says he EXECUTED {user.name}. It must clearly say that {user.name} has been executed."
-
-    try:
-        response = client_ai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": PERSONALITY},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        ai_content = response.choices[0].message.content
-    except Exception as e:
-        print("AI generation error for execution message:", e)
-        ai_content = "says Gupta executed them chaotically."
-
-    # Ensure the message always declares an execution
-    execution_message = f"EXECUTED {user.name}. {ai_content}"
-
-    try:
-        await message.channel.send(f"{user.mention} {execution_message}")
-    except Exception as e:
-        print("Failed sending execution message:", e)
-
-    # attempt to add muted role
-    try:
-        await user.add_roles(muted_role)
-    except Exception as e:
-        print("Failed to add muted role:", e)
-
-    # record execution and reset annoyance
-    execution_log.setdefault(user.id, []).append(time.time())
-    annoyance[user.id] = 0
-
-    # set cooldown at execution time
+    prompt = build_gupta_reply_prompt(message, content_lower)
+    reply = get_ai_response(prompt)
     last_response_time = time.time()
+    await send_gupta_reply(message, reply)
 
-    # keep them muted for 50 seconds
-    try:
-        await asyncio.sleep(50)
-    except Exception as e:
-        print("Sleep interrupted:", e)
-
-    try:
-        await user.remove_roles(muted_role)
-    except Exception as e:
-        print("Failed to remove muted role:", e)
-
-    # ----------------------------
-    # RANDOM RESPONSE (1/25)
-    # ----------------------------
-    if random.randint(1, 25) != 1:
-        return
-
-    try:
-        context = "\n".join(memory)
-
-        response = client_ai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": PERSONALITY},
-                {"role": "user", "content": context}
-            ]
-        )
-
-        reply = response.choices[0].message.content
-        await message.channel.send(reply)
-
-        # update cooldown
-        last_response_time = time.time()
-
-    except Exception as e:
-        print("Error in post-execution random response:", e)
 
 # ----------------------------
 # RUN BOT
 # ----------------------------
-client.run(TOKEN)
+if __name__ == "__main__":
+    client.run(TOKEN)
