@@ -2,8 +2,10 @@
 import os
 import random
 import re
+import shutil
 import threading
 import time
+from pathlib import Path
 import discord
 from dotenv import load_dotenv
 from flask import Flask
@@ -187,8 +189,8 @@ def should_process_message(message):
     return True
 
 
-NORMAL_REPLY_CHANCE = 0.01
-DIRECT_ADDRESS_REPLY_CHANCE = 0.15
+NORMAL_REPLY_CHANCE = 0.03
+DIRECT_ADDRESS_REPLY_CHANCE = 0.12
 
 
 def get_command_name(content):
@@ -237,6 +239,105 @@ def find_voice_channel_by_name(guild, target_name):
     return None
 
 
+def extract_gupta_speak_id(content):
+    if not content:
+        return None
+
+    match = re.match(r"^!guptaspeak\s*([a-zA-Z])\s*$", content.strip(), re.IGNORECASE)
+    if match:
+        sound_id = match.group(1).lower()
+        if get_gupta_speak_sound_path(sound_id) is not None:
+            return sound_id
+        return None
+
+    match = re.match(r"^!guptaspeak([a-zA-Z])\s*$", content.strip(), re.IGNORECASE)
+    if match:
+        sound_id = match.group(1).lower()
+        if get_gupta_speak_sound_path(sound_id) is not None:
+            return sound_id
+        return None
+
+    return None
+
+
+def get_gupta_speak_sound_path(sound_id):
+    if not sound_id:
+        return None
+
+    sound_map = {
+        "a": "Betyourbottomdollar.mp3",
+        "b": "Bum bumm BUMMMM.mp3",
+        "c": "Don’t want to_I don’t like it.mp3",
+        "d": "Funny laugh.mp3",
+        "e": "Gupta (1).mp3",
+        "f": "I am here.mp3",
+        "g": "Joshua.mp3",
+        "h": "Scary.mp3",
+        "i": "vine-boom.mp3",
+        "j": "Yelling no loud.mp3",
+        "k": "Angry_mad_annoyed.mp3",
+        "l": "Be funny.mp3",
+    }
+
+    filename = sound_map.get(sound_id.lower())
+    if not filename:
+        return None
+
+    return Path(__file__).resolve().parent / "Reaction sounds" / filename
+
+
+async def play_gupta_speak_sound(message, sound_id):
+    sound_path = get_gupta_speak_sound_path(sound_id)
+    if sound_path is None or not sound_path.exists():
+        await send_gupta_reply(message, "I do not know that sound ID.")
+        return
+
+    guild = getattr(message, "guild", None)
+    if guild is None:
+        await send_gupta_reply(message, "This works best in a server voice channel.")
+        return
+
+    voice_client = gupta_voice_clients.get(guild.id)
+    target_channel = None
+
+    if getattr(getattr(message, "author", None), "voice", None) is not None:
+        author_voice = getattr(message.author, "voice", None)
+        if author_voice is not None and getattr(author_voice, "channel", None) is not None:
+            target_channel = author_voice.channel
+
+    if target_channel is None and voice_client is not None and getattr(voice_client, "channel", None) is not None:
+        target_channel = voice_client.channel
+
+    if target_channel is None:
+        await send_gupta_reply(message, "Join a voice channel first so Gupta can speak there.")
+        return
+
+    if voice_client is None or getattr(voice_client, "channel", None) is None:
+        try:
+            voice_client = await target_channel.connect(timeout=10.0, reconnect=False)
+            gupta_voice_clients[guild.id] = voice_client
+        except Exception as e:
+            print("Voice join for sound playback error:", e)
+            await send_gupta_reply(message, "I could not join that voice channel.")
+            return
+    elif getattr(voice_client, "channel", None) is not None and voice_client.channel.id != target_channel.id:
+        try:
+            await voice_client.move_to(target_channel)
+        except Exception as e:
+            print("Voice move error:", e)
+            await send_gupta_reply(message, "I could not move to that voice channel.")
+            return
+
+    ffmpeg_executable = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe") or "ffmpeg"
+    try:
+        audio_source = discord.FFmpegPCMAudio(str(sound_path), executable=ffmpeg_executable)
+        voice_client.play(audio_source)
+        await send_gupta_reply(message, f"Playing sound {sound_id.upper()}.")
+    except Exception as e:
+        print("Sound playback error:", e)
+        await send_gupta_reply(message, "I could not play that sound right now.")
+
+
 async def join_voice_channel_for_message(message, target_name):
     if message.guild is None:
         await send_gupta_reply(message, "This command only works in a server voice chat.")
@@ -261,10 +362,10 @@ async def join_voice_channel_for_message(message, target_name):
     try:
         voice_client = await target_channel.connect(timeout=10.0, reconnect=False)
         gupta_voice_clients[message.guild.id] = voice_client
-        await send_gupta_reply(message, f"Joining {target_channel.name}.")
+        await send_gupta_reply(message, f"guys join {target_channel.name}.")
     except Exception as e:
         print("Voice join error:", e)
-        await send_gupta_reply(message, f"I could not join {target_channel.name} right now.")
+        await send_gupta_reply(message, f"I dont wanna {target_channel.name} right now.")
 
 
 async def leave_voice_channel_for_message(message, target_name):
@@ -606,6 +707,19 @@ async def on_message(message):
 
     content = message.content
     content_lower = content.lower().strip()
+
+    if re.match(r"^!guptaspeak\s*[a-zA-Z]\s*$", content.strip(), re.IGNORECASE) or re.match(r"^!guptaspeak[a-zA-Z]\s*$", content.strip(), re.IGNORECASE):
+        try:
+            sound_id = extract_gupta_speak_id(content)
+            if not sound_id:
+                await send_gupta_reply(message, "Use !GuptaSpeak followed by a letter, like !GuptaSpeakF")
+                return
+
+            await play_gupta_speak_sound(message, sound_id)
+        except Exception as e:
+            print("GuptaSpeak error:", e)
+            await send_gupta_reply(message, "I could not play that sound.")
+        return
 
     if content_lower.startswith("!gid"):
         try:

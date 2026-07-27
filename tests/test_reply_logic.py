@@ -118,6 +118,15 @@ class ReplyLogicTests(unittest.TestCase):
         self.assertEqual(module.find_voice_channel_by_name(guild, "vc 1").name, "VC 1")
         self.assertIsNone(module.find_voice_channel_by_name(guild, "missing channel"))
 
+    def test_guptaspeak_letter_is_parsed(self):
+        self.assertEqual(module.extract_gupta_speak_id("!GuptaSpeakF"), "f")
+        self.assertEqual(module.extract_gupta_speak_id("!GuptaSpeak F"), "f")
+        self.assertIsNone(module.extract_gupta_speak_id("!GuptaSpeakZ"))
+
+    def test_guptaspeak_maps_to_expected_audio_file(self):
+        sound_path = module.get_gupta_speak_sound_path("f")
+        self.assertTrue(sound_path.name.endswith("I am here.mp3"))
+
 
 if __name__ == "__main__":
     unittest.main()
