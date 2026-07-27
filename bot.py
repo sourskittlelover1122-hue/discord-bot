@@ -20,7 +20,7 @@ def home():
     return "Bot is alive"
 
 def run_web():
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=8080)
 
 threading.Thread(target=run_web).start()
 
