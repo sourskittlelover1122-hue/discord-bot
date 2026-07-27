@@ -41,6 +41,7 @@ client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.voice_states = True
 
 client = discord.Client(intents=intents)
 
@@ -107,6 +108,7 @@ GAMES = [
 # ----------------------------
 gupta_message_counter = 0
 gupta_message_lookup = {}
+gupta_voice_clients = {}
 
 
 def format_gupta_message_id(counter):
@@ -199,6 +201,98 @@ def get_command_name(content):
 
     match = re.match(r"^!([a-zA-Z]+)", stripped)
     return match.group(1).lower() if match else None
+
+
+def extract_voice_channel_target(content):
+    if not content:
+        return None
+
+    stripped = content.strip()
+    if not stripped.startswith("!"):
+        return None
+
+    match = re.match(r"^!(gvc|guptanoonewantsyouhere)\s*(.*)$", stripped, re.IGNORECASE)
+    if not match:
+        return None
+
+    target = match.group(2).strip()
+    return target or None
+
+
+def find_voice_channel_by_name(guild, target_name):
+    if guild is None or not target_name:
+        return None
+
+    normalized_target = target_name.strip().lower()
+    for channel in getattr(guild, "voice_channels", []) or []:
+        channel_name = getattr(channel, "name", "") or ""
+        if normalized_target == channel_name.strip().lower():
+            return channel
+
+    for channel in getattr(guild, "voice_channels", []) or []:
+        channel_name = getattr(channel, "name", "") or ""
+        if normalized_target in channel_name.strip().lower():
+            return channel
+
+    return None
+
+
+async def join_voice_channel_for_message(message, target_name):
+    if message.guild is None:
+        await send_gupta_reply(message, "This command only works in a server voice chat.")
+        return
+
+    target_channel = find_voice_channel_by_name(message.guild, target_name)
+    if target_channel is None:
+        await send_gupta_reply(message, f"I could not find a voice channel named '{target_name}'.")
+        return
+
+    existing_client = gupta_voice_clients.get(message.guild.id)
+    if existing_client is not None and getattr(existing_client, "channel", None) is not None:
+        if existing_client.channel.id == target_channel.id:
+            await send_gupta_reply(message, f"I am already in {target_channel.name}.")
+            return
+
+        try:
+            await existing_client.disconnect(force=True)
+        except Exception:
+            pass
+
+    try:
+        voice_client = await target_channel.connect(timeout=10.0, reconnect=False)
+        gupta_voice_clients[message.guild.id] = voice_client
+        await send_gupta_reply(message, f"Joining {target_channel.name}.")
+    except Exception as e:
+        print("Voice join error:", e)
+        await send_gupta_reply(message, f"I could not join {target_channel.name} right now.")
+
+
+async def leave_voice_channel_for_message(message, target_name):
+    if message.guild is None:
+        await send_gupta_reply(message, "This command only works in a server voice chat.")
+        return
+
+    target_channel = find_voice_channel_by_name(message.guild, target_name)
+    if target_channel is None:
+        await send_gupta_reply(message, f"I could not find a voice channel named '{target_name}'.")
+        return
+
+    existing_client = gupta_voice_clients.get(message.guild.id)
+    if existing_client is None or getattr(existing_client, "channel", None) is None:
+        await send_gupta_reply(message, f"I am not connected to {target_channel.name}.")
+        return
+
+    if existing_client.channel.id != target_channel.id:
+        await send_gupta_reply(message, f"I am not connected to {target_channel.name}.")
+        return
+
+    try:
+        await existing_client.disconnect(force=True)
+        gupta_voice_clients.pop(message.guild.id, None)
+        await send_gupta_reply(message, f"Leaving {target_channel.name}.")
+    except Exception as e:
+        print("Voice leave error:", e)
+        await send_gupta_reply(message, f"I could not leave {target_channel.name} right now.")
 
 
 def should_respond_to_message(message, content_lower=None, rng=None):
@@ -557,6 +651,32 @@ async def on_message(message):
             await send_gupta_reply(message, "Gupta is online")
         except Exception as e:
             print("Error:", e)
+        return
+
+    if command_name == "gvc":
+        try:
+            target_name = extract_voice_channel_target(content)
+            if not target_name:
+                await send_gupta_reply(message, "Use !GVC followed by a voice channel name, like !GVC vc 1")
+                return
+
+            await join_voice_channel_for_message(message, target_name)
+        except Exception as e:
+            print("Voice join command error:", e)
+            await send_gupta_reply(message, "I could not join that voice channel.")
+        return
+
+    if command_name == "guptanoonewantsyouhere":
+        try:
+            target_name = extract_voice_channel_target(content)
+            if not target_name:
+                await send_gupta_reply(message, "Use !Guptanoonewantsyouhere followed by a voice channel name, like !Guptanoonewantsyouhere vc 1")
+                return
+
+            await leave_voice_channel_for_message(message, target_name)
+        except Exception as e:
+            print("Voice leave command error:", e)
+            await send_gupta_reply(message, "I could not leave that voice channel.")
         return
 
     # ----------------------------

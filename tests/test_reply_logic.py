@@ -107,6 +107,17 @@ class ReplyLogicTests(unittest.TestCase):
         self.assertEqual(module.get_command_name("!Guptachangeyourmind 5 angry"), "guptachangeyourmind")
         self.assertEqual(module.get_command_name("!Guptaareyouonline"), "guptaareyouonline")
 
+    def test_voice_channel_targets_are_parsed_from_commands(self):
+        self.assertEqual(module.extract_voice_channel_target("!GVC vc 1"), "vc 1")
+        self.assertEqual(module.extract_voice_channel_target("!Guptanoonewantsyouhere vc 1"), "vc 1")
+
+    def test_voice_channel_lookup_is_case_insensitive(self):
+        guild = SimpleNamespace(
+            voice_channels=[SimpleNamespace(name="VC 1"), SimpleNamespace(name="Lobby")],
+        )
+        self.assertEqual(module.find_voice_channel_by_name(guild, "vc 1").name, "VC 1")
+        self.assertIsNone(module.find_voice_channel_by_name(guild, "missing channel"))
+
 
 if __name__ == "__main__":
     unittest.main()
