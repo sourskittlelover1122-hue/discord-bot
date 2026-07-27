@@ -184,6 +184,21 @@ def should_process_message(message):
     return True
 
 
+NORMAL_REPLY_CHANCE = 0.06
+
+
+def get_command_name(content):
+    if not content:
+        return None
+
+    stripped = content.strip()
+    if not stripped.startswith("!"):
+        return None
+
+    match = re.match(r"^!([a-zA-Z]+)", stripped)
+    return match.group(1).lower() if match else None
+
+
 def should_respond_to_message(message, content_lower=None, rng=None):
     if message is None or getattr(message.author, "bot", False):
         return False
@@ -210,9 +225,6 @@ def should_respond_to_message(message, content_lower=None, rng=None):
     if "gupta" in content_lower:
         return True
 
-    if any(token in content_lower for token in REPLY_TOKENS):
-        return True
-
     if "?" in getattr(message, "content", "") or "!" in getattr(message, "content", ""):
         return True
 
@@ -222,7 +234,7 @@ def should_respond_to_message(message, content_lower=None, rng=None):
     if rng is None:
         rng = random.random
 
-    return rng() < 0.10
+    return rng() < NORMAL_REPLY_CHANCE
 
 
 def extract_topic_keywords(text):
@@ -442,8 +454,8 @@ async def on_ready():
 async def gupta_ping_task():
     await client.wait_until_ready()
 
-    # FIRST RUN QUICK (20 seconds)
-    await asyncio.sleep(20)
+    # FIRST RUN AFTER A LONG DELAY SO RESTARTS DO NOT IMMEDIATELY PING
+    await asyncio.sleep(60 * 60 * 18)
 
     while not client.is_closed():
         try:
@@ -511,10 +523,12 @@ async def on_message(message):
             print("Gid error:", e)
         return
 
+    command_name = get_command_name(content)
+
     # ----------------------------
     # !MIMICGUPTA COMMAND
     # ----------------------------
-    if content_lower.startswith("!mimicgupta"):
+    if command_name == "mimicgupta":
         try:
             mimic_text = content[len("!mimicgupta"):].strip()
             if not mimic_text:
@@ -526,10 +540,17 @@ async def on_message(message):
             print("Error:", e)
         return
 
+    if command_name == "guptaareyouonline":
+        try:
+            await send_gupta_reply(message, "Gupta is online")
+        except Exception as e:
+            print("Error:", e)
+        return
+
     # ----------------------------
     # !GUPTA COMMAND (IGNORES COOLDOWN)
     # ----------------------------
-    if content_lower.startswith("!gupta"):
+    if command_name == "gupta":
         try:
             user_input = content[6:].strip()
             if not user_input:
@@ -585,7 +606,7 @@ async def on_message(message):
         content,
         re.IGNORECASE,
     )
-    if gupta_change_match:
+    if gupta_change_match and command_name == "guptachangeyourmind":
         try:
             message_id = f"{int(gupta_change_match.group('id')):04d}"
             target_message = gupta_message_lookup.get(message_id)

@@ -89,6 +89,17 @@ class ReplyLogicTests(unittest.TestCase):
         self.assertTrue(module.should_process_message(message))
         self.assertFalse(module.should_process_message(message))
 
+    def test_normal_messages_are_less_likely_to_trigger_reply(self):
+        message = SimpleNamespace(
+            author=SimpleNamespace(bot=False),
+            content="just chatting about random stuff",
+        )
+        self.assertFalse(module.should_respond_to_message(message, "just chatting about random stuff", rng=lambda: 0.07))
+
+    def test_specific_gupta_commands_are_detected(self):
+        self.assertEqual(module.get_command_name("!Guptachangeyourmind 5 angry"), "guptachangeyourmind")
+        self.assertEqual(module.get_command_name("!Guptaareyouonline"), "guptaareyouonline")
+
 
 if __name__ == "__main__":
     unittest.main()
