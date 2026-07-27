@@ -62,7 +62,7 @@ class ReplyLogicTests(unittest.TestCase):
             author=SimpleNamespace(bot=False),
             content="yo bro what are you doing",
         )
-        self.assertTrue(module.should_respond_to_message(message, "yo bro what are you doing", rng=lambda: 0.05))
+        self.assertFalse(module.should_respond_to_message(message, "yo bro what are you doing", rng=lambda: 0.05))
 
     def test_commands_do_not_trigger_reply(self):
         message = SimpleNamespace(
@@ -82,7 +82,7 @@ class ReplyLogicTests(unittest.TestCase):
             author=SimpleNamespace(bot=False, name="alice"),
             content="yeah",
         )
-        self.assertTrue(module.should_respond_to_message(message, "yeah", rng=lambda: 0.99))
+        self.assertFalse(module.should_respond_to_message(message, "yeah", rng=lambda: 0.99))
 
     def test_duplicate_message_ids_are_suppressed(self):
         message = SimpleNamespace(id=9991, author=SimpleNamespace(bot=False))

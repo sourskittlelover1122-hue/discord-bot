@@ -184,7 +184,7 @@ def should_process_message(message):
     return True
 
 
-NORMAL_REPLY_CHANCE = 0.06
+NORMAL_REPLY_CHANCE = 0.01
 
 
 def get_command_name(content):
@@ -217,10 +217,11 @@ def should_respond_to_message(message, content_lower=None, rng=None):
             return True
 
     author_name = getattr(getattr(message, "author", None), "name", None)
+    direct_address_bonus = 0.0
     if author_name:
         direct_entry = direct_address_memory.get(author_name)
         if direct_entry and direct_entry.get("expires_at", 0) > time.time():
-            return True
+            direct_address_bonus = 0.03
 
     if "gupta" in content_lower:
         return True
@@ -234,7 +235,7 @@ def should_respond_to_message(message, content_lower=None, rng=None):
     if rng is None:
         rng = random.random
 
-    return rng() < NORMAL_REPLY_CHANCE
+    return rng() < NORMAL_REPLY_CHANCE + direct_address_bonus
 
 
 def extract_topic_keywords(text):
