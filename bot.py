@@ -519,6 +519,8 @@ async def on_message(message):
                     await send_gupta_reply(message, "That message is not tracked by Gupta yet.")
             else:
                 await send_gupta_reply(message, "Reply to one of Gupta's messages with !Gid to get its ID.")
+
+            await message.delete()
         except Exception as e:
             print("Gid error:", e)
         return
@@ -575,6 +577,7 @@ async def on_message(message):
             await target_message.delete()
             gupta_message_lookup.pop(message_id, None)
             await send_gupta_reply(message, f"Deleted Gupta message {message_id}.")
+            await message.delete()
         except Exception as e:
             print("GDel error:", e)
             await send_gupta_reply(message, "I could not delete that Gupta message.")
@@ -596,6 +599,7 @@ async def on_message(message):
 
             await target_message.edit(content=new_text)
             await send_gupta_reply(message, f"Updated Gupta message {message_id}.")
+            await message.delete()
         except Exception as e:
             print("GEdit error:", e)
             await send_gupta_reply(message, "I could not edit that Gupta message.")
@@ -622,6 +626,7 @@ async def on_message(message):
             new_text = rewrite_message_for_emotion(target_message.content, emotion)
             await target_message.edit(content=new_text)
             await send_gupta_reply(message, f"Changed Gupta message {message_id} to express {emotion}.")
+            await message.delete()
         except Exception as e:
             print("GuptaChange error:", e)
             await send_gupta_reply(message, "I could not change that Gupta message.")
