@@ -312,6 +312,14 @@ async def play_gupta_speak_sound(message, sound_id):
         await send_gupta_reply(message, "Join a voice channel first so Gupta can speak there.")
         return
 
+    permissions = target_channel.permissions_for(guild.me)
+    if not permissions.connect:
+        await send_gupta_reply(message, "I do not have permission to join that voice channel.")
+        return
+    if not permissions.speak:
+        await send_gupta_reply(message, "I do not have permission to speak in that voice channel.")
+        return
+
     if voice_client is None or getattr(voice_client, "channel", None) is None:
         try:
             voice_client = await target_channel.connect(timeout=10.0, reconnect=False)
@@ -328,13 +336,18 @@ async def play_gupta_speak_sound(message, sound_id):
             await send_gupta_reply(message, "I could not move to that voice channel.")
             return
 
-    ffmpeg_executable = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe") or "ffmpeg"
+    ffmpeg_executable = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+    if not ffmpeg_executable:
+        print("FFmpeg executable not found on PATH")
+        await send_gupta_reply(message, "I cannot play audio here because ffmpeg is not available.")
+        return
+
     try:
         audio_source = discord.FFmpegPCMAudio(str(sound_path), executable=ffmpeg_executable)
         voice_client.play(audio_source)
         await send_gupta_reply(message, f"Playing sound {sound_id.upper()}.")
     except Exception as e:
-        print("Sound playback error:", e)
+        print("Sound playback error:", repr(e))
         await send_gupta_reply(message, "I could not play that sound right now.")
 
 
