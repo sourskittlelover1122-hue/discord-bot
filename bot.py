@@ -437,6 +437,10 @@ async def ensure_voice_receive_listening(voice_client):
         return False
 
 
+def format_gupta_message_id(counter):
+    return f"GID{counter:04d}"
+
+
 async def track_gupta_message(message):
     global gupta_message_counter
     gupta_message_counter += 1
