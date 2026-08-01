@@ -121,11 +121,29 @@ class ReplyLogicTests(unittest.TestCase):
     def test_guptaspeak_letter_is_parsed(self):
         self.assertEqual(module.extract_gupta_speak_id("!GuptaSpeakF"), "f")
         self.assertEqual(module.extract_gupta_speak_id("!GuptaSpeak F"), "f")
+
+        sound_dir = module.Path(module.__file__).resolve().parent / "Reaction sounds"
+        temp_path = sound_dir / "TempSound_A1.mp3"
+        temp_path.write_bytes(b"test")
+        try:
+            self.assertEqual(module.extract_gupta_speak_id("!GuptaSpeakA1"), "a1")
+        finally:
+            temp_path.unlink(missing_ok=True)
+
         self.assertIsNone(module.extract_gupta_speak_id("!GuptaSpeakZ"))
 
     def test_guptaspeak_maps_to_expected_audio_file(self):
         sound_path = module.get_gupta_speak_sound_path("f")
         self.assertTrue(sound_path.name.endswith("I am here.mp3"))
+
+    def test_guptaspeak_discovers_audio_tag_from_filename(self):
+        sound_dir = module.Path(module.__file__).resolve().parent / "Reaction sounds"
+        temp_path = sound_dir / "TempSound_A1.mp3"
+        temp_path.write_bytes(b"test")
+        try:
+            self.assertEqual(module.get_gupta_speak_sound_path("A1"), temp_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

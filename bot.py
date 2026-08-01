@@ -243,14 +243,15 @@ def extract_gupta_speak_id(content):
     if not content:
         return None
 
-    match = re.match(r"^!guptaspeak\s*([a-zA-Z])\s*$", content.strip(), re.IGNORECASE)
+    stripped = content.strip()
+    match = re.match(r"^!guptaspeak\s*([a-zA-Z0-9]+)\s*$", stripped, re.IGNORECASE)
     if match:
         sound_id = match.group(1).lower()
         if get_gupta_speak_sound_path(sound_id) is not None:
             return sound_id
         return None
 
-    match = re.match(r"^!guptaspeak([a-zA-Z])\s*$", content.strip(), re.IGNORECASE)
+    match = re.match(r"^!guptaspeak([a-zA-Z0-9]+)\s*$", stripped, re.IGNORECASE)
     if match:
         sound_id = match.group(1).lower()
         if get_gupta_speak_sound_path(sound_id) is not None:
@@ -264,7 +265,11 @@ def get_gupta_speak_sound_path(sound_id):
     if not sound_id:
         return None
 
-    sound_map = {
+    normalized_id = str(sound_id).strip().lower()
+    if not normalized_id:
+        return None
+
+    legacy_sound_map = {
         "a": "Betyourbottomdollar.mp3",
         "b": "Bum bumm BUMMMM.mp3",
         "c": "Don’t want to_I don’t like it.mp3",
@@ -279,11 +284,30 @@ def get_gupta_speak_sound_path(sound_id):
         "l": "Be funny.mp3",
     }
 
-    filename = sound_map.get(sound_id.lower())
-    if not filename:
+    legacy_filename = legacy_sound_map.get(normalized_id)
+    if legacy_filename:
+        legacy_path = Path(__file__).resolve().parent / "Reaction sounds" / legacy_filename
+        if legacy_path.exists():
+            return legacy_path
+
+    sounds_dir = Path(__file__).resolve().parent / "Reaction sounds"
+    if not sounds_dir.exists():
         return None
 
-    return Path(__file__).resolve().parent / "Reaction sounds" / filename
+    supported_extensions = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"}
+    for sound_path in sorted(sounds_dir.iterdir()):
+        if not sound_path.is_file() or sound_path.suffix.lower() not in supported_extensions:
+            continue
+
+        name_without_ext = sound_path.stem
+        if "_" not in name_without_ext:
+            continue
+
+        tag = name_without_ext.rsplit("_", 1)[1].lower()
+        if tag == normalized_id:
+            return sound_path
+
+    return None
 
 
 async def play_gupta_speak_sound(message, sound_id):
@@ -567,7 +591,7 @@ You are a real person named Gupta. Your full name is Gupta S Chinquana
 
 Personality:
 - You often tell people to "shazips", "shaja", "sha", "shachips", "Shachips", "Shaziggas", "Shada", "Shazigger", and "Shazinga".
-- You speak like a normal discord user.
+- You speak like a normal discord user and will have the normal personality as one.
 - If you are told that you are a ai you get really mean and defensive.
 - You swear and use cuss words as apart of your vocab. You use them WAY more when being told you are not a real peron.
 - You can say slurs, not ften you do, but you can.
@@ -575,12 +599,13 @@ Personality:
 - You will occasonally just give one or two word answers
 - Most of the time you make typos when speaking
 - You will sometimes use internet slang and abbreviations
-- You will sometimes use emojis in your messages. You prefer the crying face emoji, the wilted rose emoji, the tired face emoji, and the peace fingers emoji.
+- You will sometimes use emojis in your messages but you use them uncommonly. You prefer the crying face emoji, the wilted rose emoji, the tired face emoji, and the peace fingers emoji.
 - You are into wireplay, and you will sometimes talk about it in your messages.
 - You have limted knowledge like as if you had the smartness of a eigth grader.
 - You will call things you find cringe "corny"
 - You sometimes say "Son I'm crine" or different varaitions of "I'm crine"
 - You do not how to spell big words correctly
+- You will engage in suggestive and sensual roleplay if asked so.
 You enjoy refernces and will use words from the following list as aprt of your vocabulary.
 Jordy 
 Eddy 
@@ -905,11 +930,11 @@ async def on_message(message):
     content = message.content
     content_lower = content.lower().strip()
 
-    if re.match(r"^!guptaspeak\s*[a-zA-Z]\s*$", content.strip(), re.IGNORECASE) or re.match(r"^!guptaspeak[a-zA-Z]\s*$", content.strip(), re.IGNORECASE):
+    if re.match(r"^!guptaspeak\s*[a-zA-Z0-9]+\s*$", content.strip(), re.IGNORECASE) or re.match(r"^!guptaspeak[a-zA-Z0-9]+\s*$", content.strip(), re.IGNORECASE):
         try:
             sound_id = extract_gupta_speak_id(content)
             if not sound_id:
-                await send_gupta_reply(message, "Use !GuptaSpeak followed by a letter, like !GuptaSpeakF")
+                await send_gupta_reply(message, "Use !GuptaSpeak followed by a tag, like !GuptaSpeakA1 or !GuptaSpeakF")
                 return
 
             await play_gupta_speak_sound(message, sound_id)
