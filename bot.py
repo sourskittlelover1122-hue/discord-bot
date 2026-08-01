@@ -392,6 +392,29 @@ def stop_voice_processor(guild_id):
         processor.stop()
 
 
+async def ensure_voice_receive_listening(voice_client):
+    if voice_client is None or not getattr(voice_client, "is_connected", lambda: False)():
+        return False
+
+    if not isinstance(voice_client, VoiceRecvClient):
+        return False
+
+    try:
+        if voice_client.is_listening():
+            return True
+    except Exception:
+        pass
+
+    try:
+        stop_voice_processor(voice_client.guild.id)
+        processor = start_voice_processor(voice_client)
+        voice_client.listen(GuptaVoiceSink(processor))
+        return True
+    except Exception as e:
+        print("Failed to start voice receive:", e)
+        return False
+
+
 async def track_gupta_message(message):
     global gupta_message_counter
     gupta_message_counter += 1
@@ -610,11 +633,14 @@ async def maybe_join_voice_channel(message):
             except Exception as e:
                 print("Voice move error:", e)
                 return None
+        if isinstance(voice_client, VoiceRecvClient):
+            await ensure_voice_receive_listening(voice_client)
         return voice_client
 
     try:
         voice_client = await target_channel.connect(cls=VoiceRecvClient, timeout=10.0, reconnect=False)
         gupta_voice_clients[message.guild.id] = voice_client
+        await ensure_voice_receive_listening(voice_client)
         return voice_client
     except Exception as e:
         print("Voice join for sound playback error:", e)
@@ -625,18 +651,18 @@ async def play_gupta_speak_sound(message, sound_id):
     sound_path = get_gupta_speak_sound_path(sound_id)
     if sound_path is None or not sound_path.exists():
         await send_gupta_reply(message, "I do not know that sound ID.")
-        return
+        return True
 
     voice_client = await maybe_join_voice_channel(message)
     if voice_client is None:
         await send_gupta_reply(message, "Join a voice channel first so Gupta can speak there.")
-        return
+        return True
 
     ffmpeg_executable = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
     if not ffmpeg_executable:
         print("FFmpeg executable not found on PATH")
         await send_gupta_reply(message, "I cannot play audio here because ffmpeg is not available.")
-        return
+        return True
 
     try:
         audio_source = discord.FFmpegPCMAudio(str(sound_path), executable=ffmpeg_executable)
@@ -647,40 +673,31 @@ async def play_gupta_speak_sound(message, sound_id):
     except Exception as e:
         print("Sound playback error:", repr(e))
         await send_gupta_reply(message, "I could not play that sound right now.")
+    return True
 
 
 async def join_voice_channel_for_message(message, target_name):
     if message.guild is None:
         await send_gupta_reply(message, "This command only works in a server voice chat.")
-        return
+        return True
 
     target_channel = find_voice_channel_by_name(message.guild, target_name)
     if target_channel is None:
         await send_gupta_reply(message, f"I could not find a voice channel named '{target_name}'.")
-        return
+        return True
 
     existing_client = gupta_voice_clients.get(message.guild.id)
     if existing_client is not None and getattr(existing_client, "channel", None) is not None:
         if existing_client.channel.id == target_channel.id:
-            # If Gupta is already connected, make sure voice receive is enabled.
-            if getattr(existing_client, "is_listening", None) is None or not existing_client.is_listening():
-                try:
-                    if not isinstance(existing_client, VoiceRecvClient):
-                        await existing_client.disconnect(force=True)
-                        existing_client = None
-                        stop_voice_processor(message.guild.id)
-                    else:
-                        processor = start_voice_processor(existing_client)
-                        existing_client.listen(GuptaVoiceSink(processor))
-                        await send_gupta_reply(message, f"I am already in {target_channel.name} and now listening.")
-                        return
-                except Exception as e:
-                    print("Voice join error while enabling listening:", e)
-                    await send_gupta_reply(message, "I am already in the channel but could not start listening.")
-                    return
-            else:
+            if await ensure_voice_receive_listening(existing_client):
                 await send_gupta_reply(message, f"I am already in {target_channel.name} and listening.")
-                return
+                return True
+            try:
+                await existing_client.disconnect(force=True)
+            except Exception:
+                pass
+            stop_voice_processor(message.guild.id)
+            existing_client = None
         else:
             try:
                 await existing_client.disconnect(force=True)
@@ -691,32 +708,34 @@ async def join_voice_channel_for_message(message, target_name):
     try:
         voice_client = await target_channel.connect(cls=VoiceRecvClient, timeout=10.0, reconnect=False)
         gupta_voice_clients[message.guild.id] = voice_client
-        processor = start_voice_processor(voice_client)
-        voice_client.listen(GuptaVoiceSink(processor))
-        await send_gupta_reply(message, f"guys join {target_channel.name}.")
+        if await ensure_voice_receive_listening(voice_client):
+            await send_gupta_reply(message, f"guys join {target_channel.name}.")
+        else:
+            await send_gupta_reply(message, f"I joined {target_channel.name}, but I could not start listening.")
     except Exception as e:
         print("Voice join error:", e)
         await send_gupta_reply(message, f"I dont wanna {target_channel.name} right now.")
+    return True
 
 
 async def leave_voice_channel_for_message(message, target_name):
     if message.guild is None:
         await send_gupta_reply(message, "This command only works in a server voice chat.")
-        return
+        return True
 
     target_channel = find_voice_channel_by_name(message.guild, target_name)
     if target_channel is None:
         await send_gupta_reply(message, f"I could not find a voice channel named '{target_name}'.")
-        return
+        return True
 
     existing_client = gupta_voice_clients.get(message.guild.id)
     if existing_client is None or getattr(existing_client, "channel", None) is None:
         await send_gupta_reply(message, f"I am not connected to {target_channel.name}.")
-        return
+        return True
 
     if existing_client.channel.id != target_channel.id:
         await send_gupta_reply(message, f"I am not connected to {target_channel.name}.")
-        return
+        return True
 
     try:
         await existing_client.disconnect(force=True)
@@ -726,6 +745,7 @@ async def leave_voice_channel_for_message(message, target_name):
     except Exception as e:
         print("Voice leave error:", e)
         await send_gupta_reply(message, f"I could not leave {target_channel.name} right now.")
+    return True
 
 
 def should_respond_to_message(message, content_lower=None, rng=None):
@@ -1235,7 +1255,6 @@ async def on_message(message):
             await play_gupta_speak_sound(message, sound_id)
         except Exception as e:
             print("GuptaSpeak error:", e)
-            await send_gupta_reply(message, "I could not play that sound.")
         return
 
     if content_lower.startswith("!gid"):
@@ -1294,7 +1313,6 @@ async def on_message(message):
             await join_voice_channel_for_message(message, target_name)
         except Exception as e:
             print("Voice join command error:", e)
-            await send_gupta_reply(message, "I could not join that voice channel.")
         return
 
     if command_name == "guptastatus":
@@ -1326,7 +1344,6 @@ async def on_message(message):
             await leave_voice_channel_for_message(message, target_name)
         except Exception as e:
             print("Voice leave command error:", e)
-            await send_gupta_reply(message, "I could not leave that voice channel.")
         return
 
     # ----------------------------
