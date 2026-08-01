@@ -3,10 +3,13 @@ import os
 import random
 import re
 import shutil
+import tempfile
 import threading
 import time
+import wave
 from pathlib import Path
 import discord
+from discord.ext.voice_recv import AudioSink, VoiceRecvClient
 from dotenv import load_dotenv
 from flask import Flask
 from openai import OpenAI
@@ -101,7 +104,7 @@ GAMES = [
     "Warframe",
     "Arcane Odyssey",
     "Jerkmate ranked",
-    "join VC"
+    "join VC",
     "Hell Divers 2",
 ]
 
@@ -111,10 +114,282 @@ GAMES = [
 gupta_message_counter = 0
 gupta_message_lookup = {}
 gupta_voice_clients = {}
+gupta_voice_processors = {}
+
+WHISPER_MODEL = "whisper-1"
+MAX_USER_AUDIO_SECONDS = 30
+AUDIO_SAMPLE_RATE = 48000
+AUDIO_CHANNELS = 2
+AUDIO_SAMPLE_WIDTH = 2
+MAX_USER_AUDIO_BYTES = AUDIO_SAMPLE_RATE * AUDIO_CHANNELS * AUDIO_SAMPLE_WIDTH * MAX_USER_AUDIO_SECONDS
+TRANSCRIPTION_CHECK_INTERVAL = 5.0
+TRANSCRIPTION_SILENCE_SECONDS = 1.5
+PENDING_REPLY_TIMEOUT = 30.0
 
 
-def format_gupta_message_id(counter):
-    return f"{counter:04d}"
+class GuptaVoiceSink(AudioSink):
+    def __init__(self, processor):
+        super().__init__()
+        self.processor = processor
+
+    def wants_opus(self):
+        return False
+
+    def write(self, user, data):
+        if user is None or data is None or data.pcm is None:
+            return
+
+        self.processor.append_audio(user, data.pcm)
+
+    def cleanup(self):
+        pass
+
+
+class GuptaVoiceProcessor:
+    def __init__(self, voice_client):
+        self.voice_client = voice_client
+        self.guild = voice_client.guild
+        self._lock = threading.Lock()
+        self.user_audio = {}
+        self.pending = {}
+        self.processing = set()
+        self.running = True
+        self.task = client.loop.create_task(self._monitor_loop())
+
+    def stop(self):
+        self.running = False
+        if not self.task.done():
+            self.task.cancel()
+        with self._lock:
+            self.user_audio.clear()
+            self.pending.clear()
+            self.processing.clear()
+
+    def append_audio(self, user, pcm_data):
+        if user is None or pcm_data is None:
+            return
+
+        with self._lock:
+            buffer_info = self.user_audio.setdefault(
+                user.id,
+                {
+                    "audio": bytearray(),
+                    "last_activity": 0.0,
+                    "user": user,
+                    "pending_since": 0.0,
+                },
+            )
+            buffer_info["audio"].extend(pcm_data)
+            if len(buffer_info["audio"]) > MAX_USER_AUDIO_BYTES:
+                trim = len(buffer_info["audio"]) - MAX_USER_AUDIO_BYTES
+                del buffer_info["audio"][:trim]
+            buffer_info["last_activity"] = time.time()
+            buffer_info["user"] = user
+
+    async def _monitor_loop(self):
+        while self.running and not client.is_closed():
+            try:
+                await asyncio.sleep(TRANSCRIPTION_CHECK_INTERVAL)
+                await self._process_ready_users()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print("Voice processor loop error:", e)
+
+    async def _process_ready_users(self):
+        now = time.time()
+        if not getattr(self.voice_client, "is_connected", lambda: False)():
+            return
+
+        with self._lock:
+            user_ids = list(self.user_audio.keys())
+
+        for user_id in user_ids:
+            if user_id in self.processing:
+                continue
+
+            with self._lock:
+                buffer_info = self.user_audio.get(user_id)
+                if buffer_info is None:
+                    continue
+                if not buffer_info["audio"]:
+                    continue
+                if now - buffer_info["last_activity"] < TRANSCRIPTION_SILENCE_SECONDS:
+                    continue
+
+            self.processing.add(user_id)
+            client.loop.create_task(self._process_user_audio(user_id))
+
+    async def _process_user_audio(self, user_id):
+        try:
+            with self._lock:
+                buffer_info = self.user_audio.get(user_id)
+                if not buffer_info or not buffer_info["audio"]:
+                    return
+                audio_bytes = bytes(buffer_info["audio"])
+                buffer_info["audio"] = bytearray()
+                user = buffer_info["user"]
+
+            transcript = await transcribe_audio_bytes(audio_bytes)
+            if not transcript:
+                return
+
+            await self._handle_transcript(user, transcript)
+        except Exception as e:
+            print("Voice transcription error:", e)
+        finally:
+            self.processing.discard(user_id)
+
+    async def _handle_transcript(self, user, transcript):
+        if not user or not transcript:
+            return
+
+        normalized = transcript.strip()
+        if not normalized:
+            return
+
+        now = time.time()
+        pending_info = self.pending.get(user.id, {"words": [], "expires": 0.0})
+        words = re.findall(r"[A-Za-z']+", normalized)
+        lower_text = normalized.lower()
+
+        if pending_info["words"]:
+            pending_info["words"].extend(words)
+            if len(pending_info["words"]) >= 20:
+                next_text = " ".join(pending_info["words"][:20])
+                await self._play_reaction_for_text(user, next_text)
+                self.pending.pop(user.id, None)
+                return
+
+            pending_info["expires"] = now + PENDING_REPLY_TIMEOUT
+            self.pending[user.id] = pending_info
+            return
+
+        if "gupta" not in lower_text:
+            return
+
+        index = next((i for i, word in enumerate(words) if word.lower() == "gupta"), None)
+        if index is None:
+            return
+
+        next_words = words[index + 1 : index + 21]
+        if len(next_words) >= 20:
+            await self._play_reaction_for_text(user, " ".join(next_words[:20]))
+            return
+
+        self.pending[user.id] = {
+            "words": next_words,
+            "expires": now + PENDING_REPLY_TIMEOUT,
+        }
+
+    async def _play_reaction_for_text(self, user, text):
+        sound_path = choose_sound_effect_for_text(text)
+        if sound_path is None:
+            return
+
+        await play_sound_in_voice(self.voice_client, sound_path)
+
+    def sweep_pending(self):
+        now = time.time()
+        with self._lock:
+            expired = [user_id for user_id, info in self.pending.items() if info["expires"] < now]
+            for user_id in expired:
+                self.pending.pop(user_id, None)
+
+
+async def transcribe_audio_bytes(audio_bytes):
+    if not audio_bytes or len(audio_bytes) < 4800:
+        return ""
+
+    temp_wav = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav_file:
+            temp_wav = temp_wav_file.name
+            with wave.open(temp_wav_file, "wb") as wf:
+                wf.setnchannels(AUDIO_CHANNELS)
+                wf.setsampwidth(AUDIO_SAMPLE_WIDTH)
+                wf.setframerate(AUDIO_SAMPLE_RATE)
+                wf.writeframes(audio_bytes)
+
+        with open(temp_wav, "rb") as audio_file:
+            transcription = client_ai.audio.transcriptions.create(
+                file=audio_file,
+                model=WHISPER_MODEL,
+                language="en",
+            )
+
+        if transcription is None:
+            return ""
+
+        if isinstance(transcription, str):
+            return transcription
+
+        return getattr(transcription, "text", None) or transcription.get("text", "")
+    except Exception as e:
+        print("OpenAI transcription error:", e)
+        return ""
+    finally:
+        if temp_wav and os.path.exists(temp_wav):
+            try:
+                os.remove(temp_wav)
+            except Exception:
+                pass
+
+
+def choose_sound_effect_for_text(text):
+    normalized = (text or "").lower()
+
+    sound_map = [
+        ("funny laugh", ["laugh", "funny", "lol", "lmao", "haha", "hilarious"], "Funny laugh.mp3"),
+        ("be funny", ["joke", "jokes", "meme", "funny", "cringe"], "Be funny.mp3"),
+        ("angry", ["angry", "mad", "hate", "stupid", "idiot", "suck"], "Angry_mad_annoyed.mp3"),
+        ("scary", ["scary", "scared", "afraid", "creepy", "terror"], "Scary.mp3"),
+        ("no", ["no", "stop", "shut", "quit", "never", "dont"], "Yelling no loud.mp3"),
+        ("boom", ["boom", "explosion", "explode", "crazy", "wild"], "Bum bumm BUMMMM.mp3"),
+        ("here", ["here", "present", "listen", "hey", "yo", "hi", "hello"], "I am here.mp3"),
+        ("vine", ["vine", "boom", "fire", "crazy"], "vine-boom.mp3"),
+    ]
+
+    for _, keywords, filename in sound_map:
+        if any(keyword in normalized for keyword in keywords):
+            path = Path(__file__).resolve().parent / "Reaction sounds" / filename
+            if path.exists():
+                return path
+
+    fallback_sounds = [
+        "Gupta (1).mp3",
+        "Betyourbottomdollar.mp3",
+        "Joshua.mp3",
+        "Don’t want to_I don’t like it.mp3",
+    ]
+    for filename in fallback_sounds:
+        path = Path(__file__).resolve().parent / "Reaction sounds" / filename
+        if path.exists():
+            return path
+
+    sounds_dir = Path(__file__).resolve().parent / "Reaction sounds"
+    if sounds_dir.exists():
+        supported_extensions = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"}
+        sound_paths = [p for p in sounds_dir.iterdir() if p.is_file() and p.suffix.lower() in supported_extensions]
+        return random.choice(sound_paths) if sound_paths else None
+
+    return None
+
+
+def get_voice_processor(guild_id):
+    return gupta_voice_processors.get(guild_id)
+
+
+def start_voice_processor(voice_client):
+    processor = GuptaVoiceProcessor(voice_client)
+    gupta_voice_processors[voice_client.guild.id] = processor
+    return processor
+
+
+def stop_voice_processor(guild_id):
+    processor = gupta_voice_processors.pop(guild_id, None)
+    if processor:
+        processor.stop()
 
 
 async def track_gupta_message(message):
@@ -310,55 +585,52 @@ def get_gupta_speak_sound_path(sound_id):
     return None
 
 
+async def maybe_join_voice_channel(message):
+    if message.guild is None:
+        return None
+
+    target_channel = None
+    if getattr(getattr(message, "author", None), "voice", None) is not None:
+        author_voice = message.author.voice
+        if author_voice is not None and getattr(author_voice, "channel", None) is not None:
+            target_channel = author_voice.channel
+
+    if target_channel is None:
+        return None
+
+    permissions = target_channel.permissions_for(message.guild.me)
+    if not permissions.connect or not permissions.speak:
+        return None
+
+    voice_client = gupta_voice_clients.get(message.guild.id)
+    if voice_client is not None and getattr(voice_client, "is_connected", lambda: False)():
+        if getattr(voice_client, "channel", None) is None or voice_client.channel.id != target_channel.id:
+            try:
+                await voice_client.move_to(target_channel)
+            except Exception as e:
+                print("Voice move error:", e)
+                return None
+        return voice_client
+
+    try:
+        voice_client = await target_channel.connect(cls=VoiceRecvClient, timeout=10.0, reconnect=False)
+        gupta_voice_clients[message.guild.id] = voice_client
+        return voice_client
+    except Exception as e:
+        print("Voice join for sound playback error:", e)
+        return None
+
+
 async def play_gupta_speak_sound(message, sound_id):
     sound_path = get_gupta_speak_sound_path(sound_id)
     if sound_path is None or not sound_path.exists():
         await send_gupta_reply(message, "I do not know that sound ID.")
         return
 
-    guild = getattr(message, "guild", None)
-    if guild is None:
-        await send_gupta_reply(message, "This works best in a server voice channel.")
-        return
-
-    voice_client = gupta_voice_clients.get(guild.id)
-    target_channel = None
-
-    if getattr(getattr(message, "author", None), "voice", None) is not None:
-        author_voice = getattr(message.author, "voice", None)
-        if author_voice is not None and getattr(author_voice, "channel", None) is not None:
-            target_channel = author_voice.channel
-
-    if target_channel is None and voice_client is not None and getattr(voice_client, "channel", None) is not None:
-        target_channel = voice_client.channel
-
-    if target_channel is None:
+    voice_client = await maybe_join_voice_channel(message)
+    if voice_client is None:
         await send_gupta_reply(message, "Join a voice channel first so Gupta can speak there.")
         return
-
-    permissions = target_channel.permissions_for(guild.me)
-    if not permissions.connect:
-        await send_gupta_reply(message, "I do not have permission to join that voice channel.")
-        return
-    if not permissions.speak:
-        await send_gupta_reply(message, "I do not have permission to speak in that voice channel.")
-        return
-
-    if voice_client is None or getattr(voice_client, "channel", None) is None:
-        try:
-            voice_client = await target_channel.connect(timeout=10.0, reconnect=False)
-            gupta_voice_clients[guild.id] = voice_client
-        except Exception as e:
-            print("Voice join for sound playback error:", e)
-            await send_gupta_reply(message, "I could not join that voice channel.")
-            return
-    elif getattr(voice_client, "channel", None) is not None and voice_client.channel.id != target_channel.id:
-        try:
-            await voice_client.move_to(target_channel)
-        except Exception as e:
-            print("Voice move error:", e)
-            await send_gupta_reply(message, "I could not move to that voice channel.")
-            return
 
     ffmpeg_executable = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
     if not ffmpeg_executable:
@@ -368,6 +640,8 @@ async def play_gupta_speak_sound(message, sound_id):
 
     try:
         audio_source = discord.FFmpegPCMAudio(str(sound_path), executable=ffmpeg_executable)
+        if voice_client.is_playing():
+            voice_client.stop()
         voice_client.play(audio_source)
         await send_gupta_reply(message, f"Playing sound {sound_id.upper()}.")
     except Exception as e:
@@ -397,8 +671,23 @@ async def join_voice_channel_for_message(message, target_name):
             pass
 
     try:
-        voice_client = await target_channel.connect(timeout=10.0, reconnect=False)
+        if existing_client is not None and getattr(existing_client, "is_connected", lambda: False)():
+            if existing_client.channel.id == target_channel.id:
+                if not existing_client.is_listening():
+                    processor = start_voice_processor(existing_client)
+                    existing_client.listen(GuptaVoiceSink(processor))
+                await send_gupta_reply(message, f"I am already in {target_channel.name} and listening.")
+                return
+            try:
+                await existing_client.disconnect(force=True)
+            except Exception:
+                pass
+            stop_voice_processor(message.guild.id)
+
+        voice_client = await target_channel.connect(cls=VoiceRecvClient, timeout=10.0, reconnect=False)
         gupta_voice_clients[message.guild.id] = voice_client
+        processor = start_voice_processor(voice_client)
+        voice_client.listen(GuptaVoiceSink(processor))
         await send_gupta_reply(message, f"guys join {target_channel.name}.")
     except Exception as e:
         print("Voice join error:", e)
@@ -427,6 +716,7 @@ async def leave_voice_channel_for_message(message, target_name):
     try:
         await existing_client.disconnect(force=True)
         gupta_voice_clients.pop(message.guild.id, None)
+        stop_voice_processor(message.guild.id)
         await send_gupta_reply(message, f"Leaving {target_channel.name}.")
     except Exception as e:
         print("Voice leave error:", e)
@@ -1000,6 +1290,21 @@ async def on_message(message):
         except Exception as e:
             print("Voice join command error:", e)
             await send_gupta_reply(message, "I could not join that voice channel.")
+        return
+
+    if command_name == "guptastatus":
+        try:
+            voice_client = gupta_voice_clients.get(message.guild.id) if message.guild else None
+            if voice_client is None or not getattr(voice_client, "is_connected", lambda: False)():
+                await send_gupta_reply(message, "I am not in a voice channel right now.")
+            else:
+                channel = getattr(voice_client, "channel", None)
+                listening = getattr(voice_client, "is_listening", lambda: False)()
+                state = "listening" if listening else "connected but not listening"
+                await send_gupta_reply(message, f"I am in {channel.name if channel else 'a voice channel'} and {state}.")
+        except Exception as e:
+            print("Gupta status error:", e)
+            await send_gupta_reply(message, "I couldnt check my status right now.")
         return
 
     if command_name == "guptanoonewantsyouhere":

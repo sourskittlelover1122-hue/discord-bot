@@ -1,4 +1,5 @@
 discord.py[voice]
+discord-ext-voice_recv
 python-dotenv
 openai
 flask
