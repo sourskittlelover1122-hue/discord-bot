@@ -391,6 +391,13 @@ def stop_voice_processor(guild_id):
     if processor:
         processor.stop()
 
+    voice_client = gupta_voice_clients.get(guild_id)
+    if isinstance(voice_client, VoiceRecvClient):
+        try:
+            voice_client.stop_listening()
+        except Exception as e:
+            print("stop_voice_processor: stop_listening failed:", e)
+
 
 async def ensure_voice_receive_listening(voice_client):
     if voice_client is None:
@@ -414,13 +421,19 @@ async def ensure_voice_receive_listening(voice_client):
 
     try:
         print("ensure_voice_receive_listening: starting listener for guild", voice_client.guild.id)
+        try:
+            if hasattr(voice_client, "stop_listening"):
+                voice_client.stop_listening()
+        except Exception as e:
+            print("ensure_voice_receive_listening: existing stop_listening failed:", e)
+
         stop_voice_processor(voice_client.guild.id)
         processor = start_voice_processor(voice_client)
         voice_client.listen(GuptaVoiceSink(processor))
         print("ensure_voice_receive_listening: listener started")
         return True
     except Exception as e:
-        print("Failed to start voice receive:", e)
+        print("Failed to start voice receive:", type(e).__name__, e)
         return False
 
 
