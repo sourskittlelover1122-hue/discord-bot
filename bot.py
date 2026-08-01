@@ -393,22 +393,31 @@ def stop_voice_processor(guild_id):
 
 
 async def ensure_voice_receive_listening(voice_client):
-    if voice_client is None or not getattr(voice_client, "is_connected", lambda: False)():
+    if voice_client is None:
+        print("ensure_voice_receive_listening: voice_client is None")
+        return False
+
+    if not getattr(voice_client, "is_connected", lambda: False)():
+        print("ensure_voice_receive_listening: voice_client is not connected")
         return False
 
     if not isinstance(voice_client, VoiceRecvClient):
+        print("ensure_voice_receive_listening: voice_client is not a VoiceRecvClient", type(voice_client))
         return False
 
     try:
         if voice_client.is_listening():
+            print("ensure_voice_receive_listening: already listening")
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        print("ensure_voice_receive_listening: is_listening() check failed:", e)
 
     try:
+        print("ensure_voice_receive_listening: starting listener for guild", voice_client.guild.id)
         stop_voice_processor(voice_client.guild.id)
         processor = start_voice_processor(voice_client)
         voice_client.listen(GuptaVoiceSink(processor))
+        print("ensure_voice_receive_listening: listener started")
         return True
     except Exception as e:
         print("Failed to start voice receive:", e)
@@ -647,6 +656,30 @@ async def maybe_join_voice_channel(message):
         return None
 
 
+async def play_sound_in_voice(voice_client, sound_path):
+    if voice_client is None or sound_path is None:
+        return False
+
+    if not getattr(voice_client, "is_connected", lambda: False)():
+        print("play_sound_in_voice: voice client is not connected")
+        return False
+
+    ffmpeg_executable = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+    if not ffmpeg_executable:
+        print("play_sound_in_voice: ffmpeg not found")
+        return False
+
+    try:
+        audio_source = discord.FFmpegPCMAudio(str(sound_path), executable=ffmpeg_executable)
+        if voice_client.is_playing():
+            voice_client.stop()
+        voice_client.play(audio_source)
+        return True
+    except Exception as e:
+        print("play_sound_in_voice error:", repr(e))
+        return False
+
+
 async def play_gupta_speak_sound(message, sound_id):
     sound_path = get_gupta_speak_sound_path(sound_id)
     if sound_path is None or not sound_path.exists():
@@ -708,7 +741,8 @@ async def join_voice_channel_for_message(message, target_name):
     try:
         voice_client = await target_channel.connect(cls=VoiceRecvClient, timeout=10.0, reconnect=False)
         gupta_voice_clients[message.guild.id] = voice_client
-        if await ensure_voice_receive_listening(voice_client):
+        listening_started = await ensure_voice_receive_listening(voice_client)
+        if listening_started:
             await send_gupta_reply(message, f"guys join {target_channel.name}.")
         else:
             await send_gupta_reply(message, f"I joined {target_channel.name}, but I could not start listening.")
@@ -1319,6 +1353,7 @@ async def on_message(message):
         voice_client = gupta_voice_clients.get(message.guild.id) if message.guild else None
         if voice_client is None or not getattr(voice_client, "is_connected", lambda: False)():
             await send_gupta_reply(message, "I am not in a voice channel right now.")
+            print("guptastatus: no voice client or not connected for guild", message.guild.id if message.guild else None)
             return
 
         channel = getattr(voice_client, "channel", None)
@@ -1327,11 +1362,18 @@ async def on_message(message):
             try:
                 listening = voice_client.is_listening()
             except Exception as e:
-                print("is_listening check failed:", e)
+                print("guptastatus: is_listening check failed:", e)
                 listening = False
 
+        processor = get_voice_processor(message.guild.id)
+        processor_state = "has processor" if processor else "no processor"
+        client_type = type(voice_client).__name__
         state = "listening" if listening else "connected but not listening"
-        await send_gupta_reply(message, f"I am in {channel.name if channel else 'a voice channel'} and {state}.")
+        reply = (
+            f"I am in {channel.name if channel else 'a voice channel'} ({client_type}) and {state}. {processor_state}."
+        )
+        await send_gupta_reply(message, reply)
+        print("guptastatus:", reply, "guild", message.guild.id if message.guild else None)
         return
 
     if command_name == "guptanoonewantsyouhere":
