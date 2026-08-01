@@ -662,28 +662,33 @@ async def join_voice_channel_for_message(message, target_name):
     existing_client = gupta_voice_clients.get(message.guild.id)
     if existing_client is not None and getattr(existing_client, "channel", None) is not None:
         if existing_client.channel.id == target_channel.id:
-            await send_gupta_reply(message, f"I am already in {target_channel.name}.")
-            return
-
-        try:
-            await existing_client.disconnect(force=True)
-        except Exception:
-            pass
-
-    try:
-        if existing_client is not None and getattr(existing_client, "is_connected", lambda: False)():
-            if existing_client.channel.id == target_channel.id:
-                if not existing_client.is_listening():
-                    processor = start_voice_processor(existing_client)
-                    existing_client.listen(GuptaVoiceSink(processor))
+            # If Gupta is already connected, make sure voice receive is enabled.
+            if getattr(existing_client, "is_listening", None) is None or not existing_client.is_listening():
+                try:
+                    if not isinstance(existing_client, VoiceRecvClient):
+                        await existing_client.disconnect(force=True)
+                        existing_client = None
+                        stop_voice_processor(message.guild.id)
+                    else:
+                        processor = start_voice_processor(existing_client)
+                        existing_client.listen(GuptaVoiceSink(processor))
+                        await send_gupta_reply(message, f"I am already in {target_channel.name} and now listening.")
+                        return
+                except Exception as e:
+                    print("Voice join error while enabling listening:", e)
+                    await send_gupta_reply(message, "I am already in the channel but could not start listening.")
+                    return
+            else:
                 await send_gupta_reply(message, f"I am already in {target_channel.name} and listening.")
                 return
+        else:
             try:
                 await existing_client.disconnect(force=True)
             except Exception:
                 pass
             stop_voice_processor(message.guild.id)
 
+    try:
         voice_client = await target_channel.connect(cls=VoiceRecvClient, timeout=10.0, reconnect=False)
         gupta_voice_clients[message.guild.id] = voice_client
         processor = start_voice_processor(voice_client)
@@ -1293,18 +1298,22 @@ async def on_message(message):
         return
 
     if command_name == "guptastatus":
-        try:
-            voice_client = gupta_voice_clients.get(message.guild.id) if message.guild else None
-            if voice_client is None or not getattr(voice_client, "is_connected", lambda: False)():
-                await send_gupta_reply(message, "I am not in a voice channel right now.")
-            else:
-                channel = getattr(voice_client, "channel", None)
-                listening = getattr(voice_client, "is_listening", lambda: False)()
-                state = "listening" if listening else "connected but not listening"
-                await send_gupta_reply(message, f"I am in {channel.name if channel else 'a voice channel'} and {state}.")
-        except Exception as e:
-            print("Gupta status error:", e)
-            await send_gupta_reply(message, "I couldnt check my status right now.")
+        voice_client = gupta_voice_clients.get(message.guild.id) if message.guild else None
+        if voice_client is None or not getattr(voice_client, "is_connected", lambda: False)():
+            await send_gupta_reply(message, "I am not in a voice channel right now.")
+            return
+
+        channel = getattr(voice_client, "channel", None)
+        listening = False
+        if hasattr(voice_client, "is_listening"):
+            try:
+                listening = voice_client.is_listening()
+            except Exception as e:
+                print("is_listening check failed:", e)
+                listening = False
+
+        state = "listening" if listening else "connected but not listening"
+        await send_gupta_reply(message, f"I am in {channel.name if channel else 'a voice channel'} and {state}.")
         return
 
     if command_name == "guptanoonewantsyouhere":
