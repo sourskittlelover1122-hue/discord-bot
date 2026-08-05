@@ -54,6 +54,7 @@ memory = []
 user_memory = {}
 direct_address_memory = {}
 processed_message_ids = {}
+gupta_shutup_until = {}
 
 REPLY_TOKENS = {
     "hey",
@@ -513,8 +514,8 @@ def should_process_message(message):
     return True
 
 
-NORMAL_REPLY_CHANCE = 0.03
-DIRECT_ADDRESS_REPLY_CHANCE = 0.12
+NORMAL_REPLY_CHANCE = 0.015
+DIRECT_ADDRESS_REPLY_CHANCE = 0.08
 
 
 def get_command_name(content):
@@ -527,6 +528,27 @@ def get_command_name(content):
 
     match = re.match(r"^!([a-zA-Z]+)", stripped)
     return match.group(1).lower() if match else None
+
+
+def set_gupta_shutup(guild_id, duration_seconds=3600):
+    expires_at = time.time() + duration_seconds
+    gupta_shutup_until[guild_id] = expires_at
+    return expires_at
+
+
+def is_gupta_shutup_active(guild_id):
+    if guild_id not in gupta_shutup_until:
+        return False
+
+    expires_at = gupta_shutup_until.get(guild_id)
+    if expires_at is None:
+        return False
+
+    if expires_at <= time.time():
+        gupta_shutup_until.pop(guild_id, None)
+        return False
+
+    return True
 
 
 def extract_voice_channel_target(content):
@@ -1330,7 +1352,19 @@ async def on_message(message):
             print("Gid error:", e)
         return
 
+    guild_id = message.guild.id if getattr(message, 'guild', None) is not None else None
     command_name = get_command_name(content)
+
+    if command_name == "guptashutup":
+        try:
+            set_gupta_shutup(guild_id)
+            await send_gupta_reply(message, "Fine, I'll be quiet for an hour. Use !Gupta if you want me to speak.")
+        except Exception as e:
+            print("GuptaShutup error:", e)
+        return
+
+    if is_gupta_shutup_active(guild_id) and command_name != "gupta":
+        return
 
     # ----------------------------
     # !MIMICGUPTA COMMAND
