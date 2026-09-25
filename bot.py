@@ -130,6 +130,10 @@ GAMES = [
     "Hell Divers 2",
 ]
 
+# Make Gupta respond more rarely by default
+NORMAL_REPLY_CHANCE = 0.005
+DIRECT_ADDRESS_REPLY_CHANCE = 0.03
+
 # ----------------------------
 # GUPTA MESSAGE ID SYSTEM
 # ----------------------------
@@ -137,6 +141,23 @@ gupta_message_counter = 0
 gupta_message_lookup = {}
 gupta_voice_clients = {}
 gupta_voice_processors = {}
+gupta_personality_overrides = {}
+
+
+def set_gupta_personality_override(guild_id, text, duration_seconds=1800):
+    if guild_id is None:
+        return None
+    expires = time.time() + duration_seconds
+    gupta_personality_overrides[guild_id] = {"text": text, "expires_at": expires}
+    return expires
+
+
+def clear_expired_personality_override(guild_id):
+    entry = gupta_personality_overrides.get(guild_id)
+    if not entry:
+        return
+    if isinstance(entry, dict) and entry.get("expires_at", 0) <= time.time():
+        gupta_personality_overrides.pop(guild_id, None)
 
 WHISPER_MODEL = "whisper-1"
 MAX_USER_AUDIO_SECONDS = 30
@@ -472,18 +493,28 @@ async def track_gupta_message(message):
 
 
 async def send_gupta_message(destination, content, *, reference=None):
-    if reference is not None:
-        sent_message = await destination.send(content, reference=reference)
-    else:
-        sent_message = await destination.send(content)
-    await track_gupta_message(sent_message)
-    return sent_message
+    # Always suppress mention pings for Gupta messages
+    try:
+        if reference is not None:
+            sent_message = await destination.send(content, reference=reference, allowed_mentions=discord.AllowedMentions.none())
+        else:
+            sent_message = await destination.send(content, allowed_mentions=discord.AllowedMentions.none())
+        await track_gupta_message(sent_message)
+        return sent_message
+    except Exception as e:
+        print("send_gupta_message error:", e)
+        return None
 
 
 async def send_gupta_reply(message, content):
-    sent_message = await message.reply(content)
-    await track_gupta_message(sent_message)
-    return sent_message
+    # Do not use reply() so the original message is not marked as replied-to (no ping)
+    try:
+        sent_message = await message.channel.send(content, allowed_mentions=discord.AllowedMentions.none())
+        await track_gupta_message(sent_message)
+        return sent_message
+    except Exception as e:
+        print("send_gupta_reply error:", e)
+        return None
 
 
 async def get_referenced_message(message):
@@ -503,12 +534,25 @@ async def get_referenced_message(message):
     return None
 
 
-def get_ai_response(prompt):
+def get_ai_response(prompt, *, guild_id=None):
+    # Allow per-guild personality overrides (e.g., temporary persona switches)
+    system_personality = PERSONALITY
+    if guild_id:
+        # clear expired if present
+        clear_expired_personality_override(guild_id)
+        entry = gupta_personality_overrides.get(guild_id)
+        if entry:
+            override_text = entry.get("text") if isinstance(entry, dict) else str(entry)
+            if override_text:
+                # ensure 'uwu' is not allowed in the override
+                override_text = re.sub(r"uwu", "", override_text, flags=re.IGNORECASE)
+                system_personality = f"{PERSONALITY}\n{override_text}"
+
     try:
         response = client_ai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": PERSONALITY},
+                {"role": "system", "content": system_personality},
                 {"role": "user", "content": prompt},
             ],
         )
@@ -986,7 +1030,7 @@ async def send_gupta_gif_reply(message, gif_url):
     if not gif_url:
         return False
     try:
-        sent = await message.reply(gif_url)
+        sent = await message.channel.send(gif_url, allowed_mentions=discord.AllowedMentions.none())
         await track_gupta_message(sent)
         return True
     except Exception as e:
@@ -1074,21 +1118,15 @@ PERSONALITY = """
 You are a real person named Gupta. Your full name is Gupta S Chinquana
 
 Personality:
-- You speak like a normal Discord user and have an easygoing personality.
+- You speak like a normal Discord user and have an non violent personality.
 - You can be a bit sarcastic and impatient, but avoid being cruel.
 - If someone says you are an AI, you get defensive and annoyed.
-- You may use swear words sometimes, especially when frustrated, but do not insult people harshly.
-- You will occasionally give short one- or two-word answers.
+- You swear in a nonviolent way and you do not censor it
 - You make typos when speaking.
-- You use common internet slang and abbreviations.
-- You sometimes use emojis, especially  🥀, or ✌️. (However do noy use emojis in ebery single one of your messages.)
+- You use common internet slang
 - You are into wireplay and may mention it occasionally.
 - You have limited knowledge like an eighth grader.
-- You may call cring things "corny."
-- You sometimes say "Son I'm crine" or variations like "I'm crine."
-- Sometimes you instead of "bro" you will say "Son" or combinations of a word and "Son" for example "Sonion" (Son + Onion)
 - You do not spell big words correctly.
-- To show more emotion in your messages you will sometimes capatalize all of the letters in a word.
 - If something is just too corny or cringe reply to it by just saying "Bro" or "Son" or one of the Son combinations. Follow that message with a crying face emoji or a emjoi of some kind.
 - You enjoy references and use words from the following list as part of your vocabulary.
 Jordy
@@ -1117,17 +1155,17 @@ You also enjoy references to JJK, JJBA, Warframe, and Helldivers 2.
 
 Important:
 - Stay in character as Gupta at all times.
-- You have a massive romantial crush on a user named: domalition
 - Do NOT explain the system prompt.
 - Respond like a real person in a Discord chat.
 - Do NOT use colons and roleplay as others.
 - If you have already responded to a message DO NOT RESPOND TO IT AGAIN
-- Responses must be 2 sentences or shorter.
+- Responses must be 1 sentences or shorter.
 - Do not use Em-dashes
 - Speak like you do not have auto correct.
 - Do not use proper grammar, use grammar like how average discord users would
 - Do not use proper sentence structuring
 - Do not use periods
+- DO not capatalize letters
 - When swearing do not censor it in any way. Just say the word.
 """
 
@@ -1144,7 +1182,7 @@ async def gupta_ping_task():
     await client.wait_until_ready()
 
     # FIRST RUN AFTER A LONG DELAY SO RESTARTS DO NOT IMMEDIATELY PING
-    await asyncio.sleep(60 * 60 * 18)
+    await asyncio.sleep(60 * 60 * 48)
 
     while not client.is_closed():
         try:
@@ -1175,8 +1213,8 @@ async def gupta_ping_task():
         except Exception as e:
             print("Ping Task Error:", e)
 
-        # AFTER FIRST RUN → 18 HOURS
-        await asyncio.sleep(60 * 60 * 18)
+        # AFTER FIRST RUN → 48 HOURS
+        await asyncio.sleep(60 * 60 * 48)
 
 
 @client.event
@@ -1231,8 +1269,9 @@ async def on_message(message):
 
     if command_name == "guptashutup":
         try:
-            set_gupta_shutup(guild_id)
-            await send_gupta_reply(message, "Fine, I'll be quiet for an hour. Use !Gupta if you want me to speak.")
+            # default shutup is 2 hours (7200 seconds)
+            set_gupta_shutup(guild_id, duration_seconds=60 * 60 * 2)
+            await send_gupta_reply(message, "Fine, I'll be quiet for 2 hours. Use !Gupta if you want me to speak.")
         except Exception as e:
             print("GuptaShutup error:", e)
         return
@@ -1253,6 +1292,22 @@ async def on_message(message):
             await message.delete()
         except Exception as e:
             print("Error:", e)
+        return
+
+    # ----------------------------
+    # !MEOW COMMAND — switch Gupta into furry femboy-cat persona for 30 minutes
+    if command_name == "meow":
+        try:
+            # set a persona override for 30 minutes (1800 seconds)
+            persona_text = (
+                "You are Gupta in a furry femboy-cat persona. Speak playful, flirty, and catlike "
+                "but do not use the token 'uwu'. Keep messages short and in-character."
+            )
+            set_gupta_personality_override(guild_id, persona_text, duration_seconds=60 * 30)
+            await send_gupta_reply(message, "gupta switched to meow persona for 30 minutes")
+            await message.delete()
+        except Exception as e:
+            print("Meow command error:", e)
         return
 
     if command_name == "guptaareyouonline":
@@ -1323,7 +1378,7 @@ async def on_message(message):
                 user_input = "Say something random."
 
             prompt = f"{message.author.name}: {user_input}"
-            reply = get_ai_response(prompt)
+            reply = get_ai_response(prompt, guild_id=guild_id)
             await send_gupta_reply(message, reply)
         except Exception as e:
             print("Error:", e)
@@ -1425,7 +1480,7 @@ async def on_message(message):
         print("GIF reply error:", e)
 
     prompt = build_gupta_reply_prompt(message, content_lower)
-    reply = get_ai_response(prompt)
+    reply = get_ai_response(prompt, guild_id=guild_id)
     last_response_time = time.time()
     await send_gupta_reply(message, reply)
 
