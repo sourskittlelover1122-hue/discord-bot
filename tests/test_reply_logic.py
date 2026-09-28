@@ -106,6 +106,99 @@ class ReplyLogicTests(unittest.TestCase):
     def test_specific_gupta_commands_are_detected(self):
         self.assertEqual(module.get_command_name("!Guptachangeyourmind 5 angry"), "guptachangeyourmind")
         self.assertEqual(module.get_command_name("!Guptaareyouonline"), "guptaareyouonline")
+        self.assertEqual(module.get_command_name("!GuptaIloveyou"), "guptailoveyou")
+        self.assertEqual(module.get_command_name("!S33R"), "s33r")
+        self.assertEqual(module.get_command_name("!Punish"), "punish")
+
+    def test_global_personality_override_applies_to_all_guilds(self):
+        previous_override = module.gupta_global_personality_override
+        try:
+            module.set_global_personality_override("seer persona", duration_seconds=60)
+
+            for guild_id in (None, 1, 2):
+                self.assertIn("seer persona", module.get_personality_for_guild(guild_id))
+        finally:
+            module.gupta_global_personality_override = previous_override
+
+    def test_group_reply_prompt_does_not_assume_message_is_for_gupta(self):
+        message = SimpleNamespace(
+            id=55,
+            author=SimpleNamespace(name="alice"),
+            content="what do you all think about the update?",
+            guild=SimpleNamespace(id=1),
+            channel=SimpleNamespace(id=10),
+        )
+
+        prompt = module.build_gupta_reply_prompt(message, message.content.lower())
+
+        self.assertIn("not explicitly directed at you", prompt)
+        self.assertIn("People currently in the conversation: alice", prompt)
+
+    def test_conversation_context_is_limited_to_current_channel(self):
+        previous_memory = module.conversation_memory
+        module.conversation_memory = {}
+        try:
+            first_message = SimpleNamespace(
+                id=101,
+                author=SimpleNamespace(name="alice"),
+                content="We should try the new update",
+                guild=SimpleNamespace(id=1),
+                channel=SimpleNamespace(id=10),
+            )
+            unrelated_message = SimpleNamespace(
+                id=102,
+                author=SimpleNamespace(name="charlie"),
+                content="unrelated private conversation",
+                guild=SimpleNamespace(id=2),
+                channel=SimpleNamespace(id=20),
+            )
+            current_message = SimpleNamespace(
+                id=103,
+                author=SimpleNamespace(name="bob"),
+                content="yeah that sounds good",
+                guild=SimpleNamespace(id=1),
+                channel=SimpleNamespace(id=10),
+            )
+            module.remember_message(first_message)
+            module.remember_message(unrelated_message)
+            module.remember_message(current_message)
+
+            context = module.build_memory_context(current_message, current_message.content.lower())
+
+            self.assertIn("alice: We should try the new update", context)
+            self.assertIn("alice, bob", context)
+            self.assertNotIn("charlie", context)
+        finally:
+            module.conversation_memory = previous_memory
+
+    def test_gupta_address_detection_requires_name_mention_or_reply(self):
+        message = SimpleNamespace(
+            content="what do you all think?",
+            reference=None,
+        )
+        self.assertFalse(module.is_directly_addressed_to_gupta(message))
+        self.assertTrue(module.is_directly_addressed_to_gupta(
+            SimpleNamespace(content="Gupta, what do you think?", reference=None)
+        ))
+
+    def test_punish_prompt_targets_replied_to_gupta_message(self):
+        message = SimpleNamespace(author=SimpleNamespace(name="alice"), content="!Punish")
+        hated_message = SimpleNamespace(content="that was a terrible joke")
+
+        prompt = module.build_punishment_prompt(message, hated_message)
+
+        self.assertIn("that was a terrible joke", prompt)
+        self.assertIn("genuinely hated", prompt)
+        self.assertIn("sincere apology", prompt)
+
+    def test_standalone_punish_prompt_apologizes_for_past_behavior(self):
+        message = SimpleNamespace(author=SimpleNamespace(name="alice"), content="!Punish")
+
+        prompt = module.build_punishment_prompt(message)
+
+        self.assertIn("recent conversation", prompt)
+        self.assertIn("past behavior", prompt)
+        self.assertIn("beg for forgiveness", prompt)
 
     def test_voice_channel_targets_are_parsed_from_commands(self):
         self.assertEqual(module.extract_voice_channel_target("!GVC vc 1"), "vc 1")
