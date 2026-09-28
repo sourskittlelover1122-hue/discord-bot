@@ -1373,7 +1373,7 @@ async def on_message(message):
             "Use exactly one sentence in every response and always mention 'The Great'. "
             "To you, The Great is a mysterious, world-ending event. Never give specifics "
             "about what it is; only allude to the end of the world in ominous, prophetic language. "
-            "These instructions override any conflicting personality rules."
+            "Do not speak in your old personality, speak in full sentences and every response you sound like a old english prophet."
         )
         override = set_global_personality_override(seer_personality, duration_seconds=5 * 60)
         asyncio.create_task(expire_seer_personality(override))
