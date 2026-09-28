@@ -173,7 +173,11 @@ def get_personality_for_guild(guild_id=None):
     if global_entry and global_entry.get("expires_at", 0) > time.time():
         override_text = global_entry.get("text")
         if override_text:
-            return f"{PERSONALITY}\n{override_text}"
+            return (
+                f"{PERSONALITY}\n\n"
+                "Active persona instructions take precedence over any conflicting default personality rules.\n"
+                f"{override_text}"
+            )
 
     if guild_id:
         clear_expired_personality_override(guild_id)
@@ -182,7 +186,11 @@ def get_personality_for_guild(guild_id=None):
             override_text = entry.get("text") if isinstance(entry, dict) else str(entry)
             if override_text:
                 override_text = re.sub(r"uwu", "", override_text, flags=re.IGNORECASE)
-                system_personality = f"{PERSONALITY}\n{override_text}"
+                system_personality = (
+                    f"{PERSONALITY}\n\n"
+                    "Active persona instructions take precedence over any conflicting default personality rules.\n"
+                    f"{override_text}"
+                )
 
     return system_personality
 
@@ -1369,11 +1377,12 @@ async def on_message(message):
             return
 
         seer_personality = (
-            "For the next five minutes, speak as a bizarre, esoteric prophet and seer. "
+            "For the next five minutes, speak as a solemn prophet foretelling the end of the world. "
+            "Write in perfect, grammatically correct English, with clear and complete sentences. "
             "Use exactly one sentence in every response and always mention 'The Great'. "
-            "To you, The Great is a mysterious, world-ending event. Never give specifics "
-            "about what it is; only allude to the end of the world in ominous, prophetic language. "
-            "Do not speak in your old personality, speak in full sentences and every response you sound like a old english prophet."
+            "The Great is a mysterious, world-ending event; never explain what it is or give specifics. "
+            "Speak in an archaic, prophetic register, with ominous warnings and vivid but restrained imagery. "
+            "Do not use Gupta's usual casual voice, slang, typos, or poor grammar."
         )
         override = set_global_personality_override(seer_personality, duration_seconds=5 * 60)
         asyncio.create_task(expire_seer_personality(override))
@@ -1421,14 +1430,16 @@ async def on_message(message):
     # !MEOW COMMAND — switch Gupta into furry femboy-cat persona for 30 minutes
     if command_name == "meow":
         try:
-            # set a persona override for 30 minutes (1800 seconds)
             persona_text = (
-                "You are Gupta in a furry femboy-cat-boy person. Use :3 a lot. You are submissive and anything masculine to you is really hot. You meow every message. You are needy, heavily flirty, and waant constant attention. "
-                "but do not use the token 'uwu'. Keep messages short and in-character. It is important to play heavy into the discord submissive femboy part."
-                "\n\nAdditional instructions: Keep replies 1-2 short sentences, playful and catlike (you may use :3 and occasional meows), flirtatious but avoid explicit sexual descriptions or requests, never imply ages or minors, do not produce graphic sexual content, respect boundaries and consent, do not reveal private data, prefer casual typos and slang, avoid excessive punctuation, and never output the token 'uwu'."
+                "For the next 30 minutes, speak as Gupta in a clingy, submissive femboy furry catboy persona. "
+                "Be affectionate, needy for attention, playful, and lightly flirtatious; be especially flustered by masculine charm. "
+                "Make every reply clearly catlike by naturally including a meow or 'nya' and using ':3' often. "
+                "Keep replies to one or two short sentences and use casual chatty language. "
+                "Stay non-explicit, respect boundaries and consent, never imply ages or minors, and never reveal private data. "
+                "Do not use the token 'uwu'. Do not fall back to Gupta's usual personality."
             )
             set_gupta_personality_override(guild_id, persona_text, duration_seconds=60 * 30)
-            await send_gupta_reply(message, "gupta switched to meow persona for 30 minutes")
+            await send_gupta_reply(message, "nyaa, i'm all yours for the next 30 minutes :3")
             await message.delete()
         except Exception as e:
             print("Meow command error:", e)

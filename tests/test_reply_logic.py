@@ -116,9 +116,26 @@ class ReplyLogicTests(unittest.TestCase):
             module.set_global_personality_override("seer persona", duration_seconds=60)
 
             for guild_id in (None, 1, 2):
-                self.assertIn("seer persona", module.get_personality_for_guild(guild_id))
+                personality = module.get_personality_for_guild(guild_id)
+                self.assertIn("seer persona", personality)
+                self.assertIn("Active persona instructions take precedence", personality)
         finally:
             module.gupta_global_personality_override = previous_override
+
+    def test_guild_personality_override_takes_precedence_over_defaults(self):
+        previous_override = module.gupta_personality_overrides.get(1)
+        try:
+            module.set_gupta_personality_override(1, "Write in perfect English as a prophet.", duration_seconds=60)
+
+            personality = module.get_personality_for_guild(1)
+
+            self.assertIn("Active persona instructions take precedence", personality)
+            self.assertIn("Write in perfect English as a prophet.", personality)
+        finally:
+            if previous_override is None:
+                module.gupta_personality_overrides.pop(1, None)
+            else:
+                module.gupta_personality_overrides[1] = previous_override
 
     def test_group_reply_prompt_does_not_assume_message_is_for_gupta(self):
         message = SimpleNamespace(
