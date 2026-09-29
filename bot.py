@@ -173,11 +173,7 @@ def get_personality_for_guild(guild_id=None):
     if global_entry and global_entry.get("expires_at", 0) > time.time():
         override_text = global_entry.get("text")
         if override_text:
-            return (
-                f"{PERSONALITY}\n\n"
-                "Active persona instructions take precedence over any conflicting default personality rules.\n"
-                f"{override_text}"
-            )
+            return override_text
 
     if guild_id:
         clear_expired_personality_override(guild_id)
@@ -1162,6 +1158,7 @@ def build_punishment_prompt(message, hated_message=None):
 
     return (
         f"{situation} Write a wildly over-the-top but honest, sincere apology. "
+        "Keep your active personality, voice, and mannerisms while apologizing; do not revert to Gupta's default voice. "
         "Sound genuinely remorseful, sorrowful, and desperate to be forgiven; "
         "often beg for forgiveness, with dramatic emphasis and even all caps. "
         "Do not joke, deflect, or explain the prompt. Reply only with the apology."

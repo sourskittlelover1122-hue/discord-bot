@@ -118,7 +118,7 @@ class ReplyLogicTests(unittest.TestCase):
             for guild_id in (None, 1, 2):
                 personality = module.get_personality_for_guild(guild_id)
                 self.assertIn("seer persona", personality)
-                self.assertIn("Active persona instructions take precedence", personality)
+                self.assertNotIn("You are a real person named Gupta", personality)
         finally:
             module.gupta_global_personality_override = previous_override
 
@@ -207,6 +207,7 @@ class ReplyLogicTests(unittest.TestCase):
         self.assertIn("that was a terrible joke", prompt)
         self.assertIn("genuinely hated", prompt)
         self.assertIn("sincere apology", prompt)
+        self.assertIn("Keep your active personality, voice, and mannerisms", prompt)
 
     def test_standalone_punish_prompt_apologizes_for_past_behavior(self):
         message = SimpleNamespace(author=SimpleNamespace(name="alice"), content="!Punish")
