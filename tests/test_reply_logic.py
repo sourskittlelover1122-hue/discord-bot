@@ -27,6 +27,29 @@ class Client:
     def run(self, *args, **kwargs):
         return None
 
+class CommandTree:
+    def __init__(self, client):
+        self.client = client
+        self.commands = []
+
+    def command(self, **kwargs):
+        def decorator(func):
+            self.commands.append(func)
+            return func
+        return decorator
+
+    async def sync(self):
+        return self.commands
+
+def command_option_decorator(**kwargs):
+    return lambda func: func
+
+discord_stub.app_commands = types.SimpleNamespace(
+    CommandTree=CommandTree,
+    allowed_contexts=command_option_decorator,
+    allowed_installs=command_option_decorator,
+)
+
 discord_stub.Intents = Intents
 discord_stub.Client = Client
 sys.modules.setdefault("discord", discord_stub)
@@ -109,6 +132,13 @@ class ReplyLogicTests(unittest.TestCase):
         self.assertEqual(module.get_command_name("!GuptaIloveyou"), "guptailoveyou")
         self.assertEqual(module.get_command_name("!S33R"), "s33r")
         self.assertEqual(module.get_command_name("!Punish"), "punish")
+
+    def test_persona_scope_uses_private_channel_or_guild(self):
+        private_channel = SimpleNamespace(id=42)
+        guild = SimpleNamespace(id=7)
+
+        self.assertEqual(module.get_conversation_scope_id(None, private_channel), 42)
+        self.assertEqual(module.get_conversation_scope_id(guild, private_channel), 7)
 
     def test_global_personality_override_applies_to_all_guilds(self):
         previous_override = module.gupta_global_personality_override

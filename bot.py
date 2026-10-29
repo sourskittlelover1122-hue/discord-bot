@@ -70,6 +70,8 @@ intents.members = True
 intents.voice_states = True
 
 client = discord.Client(intents=intents)
+app_command_tree = discord.app_commands.CommandTree(client)
+app_commands_synced = False
 
 conversation_memory = {}
 direct_address_memory = {}
@@ -189,6 +191,58 @@ def get_personality_for_guild(guild_id=None):
                 )
 
     return system_personality
+
+
+def get_conversation_scope_id(guild, channel):
+    if guild is not None:
+        return guild.id
+    return getattr(channel, "id", None)
+
+
+@app_command_tree.command(name="gupta", description="Ask Gupta to say something.")
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+async def gupta_app_command(interaction, prompt: str = ""):
+    await interaction.response.defer()
+
+    user_input = prompt.strip() or "Say something random."
+    scope_id = get_conversation_scope_id(interaction.guild, interaction.channel)
+    display_name = getattr(interaction.user, "display_name", interaction.user.name)
+    reply_prompt = (
+        "Write a short, natural Discord message as Gupta responding directly to "
+        f"{display_name}. Keep it casual and relevant. Current message: {user_input}"
+    )
+    reply = await client.loop.run_in_executor(
+        None,
+        lambda: get_ai_response(reply_prompt, guild_id=scope_id),
+    )
+    sent_message = await interaction.followup.send(
+        reply,
+        allowed_mentions=discord.AllowedMentions.none(),
+        wait=True,
+    )
+    await track_gupta_message(sent_message)
+
+
+@app_command_tree.command(name="meow", description="Make Gupta meow for 30 minutes.")
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+async def meow_app_command(interaction):
+    scope_id = get_conversation_scope_id(interaction.guild, interaction.channel)
+    persona_text = (
+        "For the next 30 minutes, speak as Gupta in a clingy, submissive femboy furry catboy persona. "
+        "Be affectionate, needy for attention, playful, and lightly flirtatious; be especially flustered by masculine charm. "
+        "Make every reply clearly catlike by naturally including a meow or 'nya' and using ':3' often. "
+        "Keep replies to one or two short sentences and use casual chatty language. "
+        "Stay non-explicit, respect boundaries and consent, never imply ages or minors, and never reveal private data. "
+        "Do not use the token 'uwu'. Do not fall back to Gupta's usual personality."
+    )
+    set_gupta_personality_override(scope_id, persona_text, duration_seconds=60 * 30)
+    await interaction.response.send_message(
+        "nyaa, i'm all yours for the next 30 minutes :3",
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+    await track_gupta_message(await interaction.original_response())
 
 WHISPER_MODEL = "whisper-1"
 MAX_USER_AUDIO_SECONDS = 30
@@ -1243,7 +1297,16 @@ Important:
 # ----------------------------
 @client.event
 async def on_ready():
+    global app_commands_synced
+
     print("AI Bot is online!")
+    if not app_commands_synced:
+        try:
+            synced_commands = await app_command_tree.sync()
+            app_commands_synced = True
+            print(f"Synced {len(synced_commands)} app commands")
+        except Exception as e:
+            print("App command sync error:", e)
     client.loop.create_task(gupta_ping_task())
 
 
@@ -1351,7 +1414,10 @@ async def on_message(message):
             print("Gid error:", e)
         return
 
-    guild_id = message.guild.id if getattr(message, 'guild', None) is not None else None
+    guild_id = get_conversation_scope_id(
+        getattr(message, "guild", None),
+        getattr(message, "channel", None),
+    )
     command_name = get_command_name(content)
 
     if command_name == "guptashutup":
